@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -81,8 +81,8 @@ footer.safety{margin-top:28px;padding-top:16px;border-top:1px solid var(--line);
   <header>
     <div><h1 id="title"></h1><div class="tag">Meta Global AI Developer Hackathon 2026</div></div>
     <div class="lang" role="group" aria-label="Language">
-      <button type="button" data-lang="ar" aria-pressed="true">عربي</button>
-      <button type="button" data-lang="en" aria-pressed="false">English</button>
+      <button type="button" data-lang="ar" aria-pressed="false">عربي</button>
+      <button type="button" data-lang="en" aria-pressed="true">English</button>
     </div>
   </header>
   <p class="lead" id="lead"></p>
@@ -152,7 +152,7 @@ const T = {
   }
 };
 const $ = id => document.getElementById(id);
-let lang = (navigator.language||"").toLowerCase().startsWith("ar") ? "ar" : "en";
+let lang = "en";
 const t = k => T[lang][k];
 
 function setLang(l){
