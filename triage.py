@@ -75,11 +75,17 @@ def triage(report, code=None, lang="en"):
         raise ValueError("Code context is too long (max %d characters)." % MAX_CODE)
 
     language = lang_name(lang)
-    code_block = CODE_BLOCK_TEMPLATE.replace("{code}", code) if code else ""
-    user_msg = (
-        TRIAGE_USER.replace("{report}", report)
-        .replace("{code_block}", code_block)
-        .replace("{language}", language)
+    # JSON-quote untrusted values so embedded newlines cannot forge the visible
+    # delimiters. One-pass substitution prevents braces in submitted text from
+    # being mistaken for remaining template fields.
+    report_value = json.dumps(report, ensure_ascii=False).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    code_value = json.dumps(code, ensure_ascii=False).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    code_block = CODE_BLOCK_TEMPLATE.replace("{code}", code_value, 1) if code else ""
+    replacements = {"report": report_value, "code_block": code_block, "language": language}
+    user_msg = re.sub(
+        r"\{(report|code_block|language)\}",
+        lambda match: replacements[match.group(1)],
+        TRIAGE_USER,
     )
     messages = [
         {"role": "system", "content": TRIAGE_SYSTEM.replace("{language}", language)},

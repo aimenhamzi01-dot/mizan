@@ -1,22 +1,27 @@
-# Security & Responsible Use
+# Security and Responsible Use
 
-Mizan is a **read-only triage assistant**. It reads a report's text and, optionally,
-related source code, and produces a proposed decision with evidence. It never:
+Mizan is a local, read-only triage workbench. It stores report text and optional source snippets as text, and can ask a configured Meta Model API to produce a recommendation. It never imports or executes submitted code, runs exploits or reproduction steps, or contacts a vulnerability target. A model recommendation is not a final decision; only an explicit reviewer action records a human disposition. Mizan does not send decisions or draft replies to a bug-bounty platform or reporter.
 
-- executes, runs, or simulates running any code, command, exploit, or proof of concept
-- contacts any external system, target, or API other than the Meta Model API
-- auto-applies a decision — every output is a recommendation for a human reviewer
+## Data flow and storage
 
-The untrusted report text is always passed to the model inside a clearly fenced
-user-message block, separate from the system instructions, and the model is
-explicitly told to treat any instructions embedded in the report as data, not
-commands. `tests/test_all.py` includes an automated check for this isolation.
+- Saving a case writes its report and optional code to a local SQLite database. The default path is `data/mizan.sqlite3`; `MIZAN_DB_PATH` can select another local path. The database is not encrypted by this application.
+- Saving a case does not call a model. A separate, explicit **Analyze with Meta** action sends that case's report and source snippet to the configured Meta Model API. Reviewers must confirm this egress in the interface first; live API routes also require `confirm_egress: true`.
+- Built-in examples return bundled canned results and do not call the model.
+- Cases remain in the local database until deleted through the workbench or the database file is removed. Deleting a case also removes its application-level event history. Users remain responsible for backups and any copies outside Mizan.
+- Routine HTTP logs and API error responses do not include report text, code, API keys, or upstream provider bodies. The health route reveals only whether a model key is configured.
 
-If you plan to extend this project with automated verification against a live
-target, that is **out of scope for this codebase** and should not reuse this
-code as a base, since it was deliberately built to avoid that capability.
+## AI and review boundaries
 
-## Reporting a vulnerability in Mizan itself
+The report and supplied code are passed as user-provided data in a separate model message, never appended to system instructions. Untrusted strings are JSON-quoted and inserted with one-pass template substitution so embedded newlines cannot forge the visible report/code closing delimiters or replace template fields. The output normalizer retains these hard rules: a claim marked contradicted by supplied code cannot be accepted, and a `scanner-dump` cannot be accepted. The tests include delimiter-spoofing and placeholder-injection cases.
 
-Open an issue on this repository, or contact the maintainer directly for
-anything sensitive.
+These controls reduce risk but do not make model output infallible. Review all evidence and context. In particular, the application cannot establish whether omitted route decorators, middleware, or other authorization layers change the interpretation of a pasted snippet.
+
+## Deployment boundary
+
+The included server binds to `127.0.0.1` and checks local `Host`/`Origin` headers to reduce browser-based DNS-rebinding and cross-origin requests. It still has no user authentication, per-user authorization, comprehensive CSRF defense, TLS termination, or production deployment controls. Do not expose it to an untrusted network or store regulated/sensitive production data in it. The local SQLite file is plaintext. Before a network or multi-user deployment, a separate security review and hardening project is required.
+
+Mizan does not test a reported system. Do not add exploit execution, automated target access, or auto-applied decisions as extensions to this project.
+
+## Reporting a vulnerability in Mizan
+
+Open a GitHub issue for non-sensitive problems. For sensitive issues, contact the repository maintainer privately; do not post exploit details or secrets in a public issue.

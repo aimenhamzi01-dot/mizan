@@ -9,6 +9,7 @@ import urllib.request
 
 DEFAULT_BASE = "https://api.meta.ai/v1"
 DEFAULT_MODELS = "muse-spark-1.3,muse-spark-1.1"
+MAX_RESPONSE_BYTES = 1_000_000
 
 
 class MetaAPIError(Exception):
@@ -66,19 +67,21 @@ def chat(messages, *, max_tokens=3000, temperature=0.2, timeout=120):
         )
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                raw = resp.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise MetaAPIError("Meta API response exceeded the configured size limit.", 502)
+            data = json.loads(raw.decode("utf-8"))
             text = _content_to_text(data["choices"][0]["message"].get("content"))
             if not text.strip():
                 raise MetaAPIError("The model returned an empty answer. Try again.", 502)
             return text
         except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            last_error = MetaAPIError("Meta API error %s: %s" % (e.code, body[:400]), e.code)
+            body = e.read(4096).decode("utf-8", errors="replace")
             if e.code in (400, 404) and "model" in body.lower():
                 continue  # model name not available for this key: try the next one
-            raise last_error
-        except urllib.error.URLError as e:
-            raise MetaAPIError("Network error: %s" % e.reason, 502)
-        except (KeyError, IndexError, json.JSONDecodeError):
+            raise MetaAPIError("Meta API returned HTTP status %d." % e.code, e.code)
+        except urllib.error.URLError:
+            raise MetaAPIError("Could not reach the configured Meta API endpoint.", 502)
+        except (KeyError, IndexError, json.JSONDecodeError, UnicodeDecodeError, TypeError):
             raise MetaAPIError("Unexpected response format from the API.", 502)
     raise last_error or MetaAPIError("No model available.", 502)
