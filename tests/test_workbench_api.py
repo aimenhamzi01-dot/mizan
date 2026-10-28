@@ -92,6 +92,15 @@ class WorkbenchAPITests(unittest.TestCase):
         self.assertNotIn("report", metrics)
         self.assertNotIn("code", metrics)
 
+    def test_container_healthcheck_is_public_and_minimal(self):
+        status, _, body = self.request("/healthz", auth=False)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"ok": True})
+        status, _, _ = self.request(
+            "/healthz", auth=False, extra_headers={"Host": "attacker.example"}
+        )
+        self.assertEqual(status, 403)
+
     def test_api_requires_valid_bearer_token_and_does_not_create_unauthorized_case(self):
         status, headers, body = self.request("/api/health", auth=False)
         self.assertEqual(status, 401)

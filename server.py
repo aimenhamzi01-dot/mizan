@@ -179,6 +179,9 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             self._send(200, (ROOT / "static" / "index.html").read_bytes(), "text/html; charset=utf-8")
             return
+        if path == "/healthz":
+            self._send(200, {"ok": True})
+            return
         try:
             if path == "/api/health":
                 self._send(200, {"ok": True, "has_key": meta_client.has_key(), "storage": "local-sqlite"})
@@ -357,5 +360,8 @@ class RequestError(Exception):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8000"))
+    bind_host = os.environ.get("MIZAN_BIND_HOST", "127.0.0.1").strip()
+    if bind_host not in {"127.0.0.1", "0.0.0.0"}:
+        raise SystemExit("MIZAN_BIND_HOST must be 127.0.0.1 or 0.0.0.0.")
     review_store.init_db()
-    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+    ThreadingHTTPServer((bind_host, port), Handler).serve_forever()

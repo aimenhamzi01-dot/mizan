@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  test-and-container:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -13,6 +13,58 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
-      - name: Run unit tests
-        run: python -m unittest discover -s tests
+          python-version: "3.12"
+      - name: Run offline test suite
+        run: python -m unittest discover -s tests -v
+      - name: Validate Compose, build, and smoke-test the container
+        env:
+          # Test-only credential. Never use a real judge token or provider key in CI.
+          MIZAN_JUDGE_TOKEN: mizan-ci-test-token-0123456789abcdef
+        run: |
+          set -euo pipefail
+          cleanup() {
+            docker compose down --volumes --remove-orphans
+          }
+          trap cleanup EXIT
+          docker compose config --quiet
+          docker compose up --build --detach
+          container_id="$(docker compose ps -q mizan)"
+          if [ -z "$container_id" ]; then
+            docker compose logs mizan
+            echo "Mizan container was not created." >&2
+            exit 1
+          fi
+          for attempt in $(seq 1 30); do
+            health="$(docker inspect --format '{{.State.Health.Status}}' "$container_id" 2>/dev/null || true)"
+            if [ "$health" = "healthy" ]; then
+              break
+            fi
+            if [ "$health" = "unhealthy" ]; then
+              docker compose logs mizan
+              exit 1
+            fi
+            sleep 1
+          done
+          if [ "${health:-}" != "healthy" ]; then
+            docker compose logs mizan
+            echo "Mizan container did not become healthy." >&2
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          from urllib.request import Request, urlopen
+
+          with urlopen("http://127.0.0.1:8000/healthz", timeout=3) as response:
+              assert response.status == 200
+              assert json.loads(response.read()) == {"ok": True}
+
+          request = Request(
+              "http://127.0.0.1:8000/api/health",
+              headers={"Authorization": "Bearer mizan-ci-test-token-0123456789abcdef"},
+          )
+          with urlopen(request, timeout=3) as response:
+              payload = json.loads(response.read())
+              assert response.status == 200
+              assert payload["storage"] == "local-sqlite"
+              assert payload["has_key"] is False
+          PY

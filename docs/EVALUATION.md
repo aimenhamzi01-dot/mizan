@@ -32,8 +32,8 @@ Do not optimize for a high acceptance rate. For security triage, unsupported acc
 
 1. Prepare a local, synthetic or explicitly authorized set and keep it outside the public repository if it contains sensitive details.
 2. Run the offline test suite first: `python -m unittest discover -s tests -v`.
-3. Configure a private `MIZAN_JUDGE_TOKEN` for the local API as described in the operations guide. Do not place it in the public repository.
-4. For model evaluation, configure a trusted Meta API endpoint and authorized key. Each live analysis sends the selected report and code externally. Use the local workbench confirmation for each case.
+3. Start your own Python or Docker instance and run `python3 scripts/bootstrap.py` to create its private access token. Do not place the generated token in the public repository.
+4. For model evaluation, configure your own authorized Meta API key and a trusted endpoint. You are responsible for your provider usage charges. Each live analysis sends the selected report and code externally; confirm this in the local workbench for every case.
 5. Record outputs and reviewer labels in a protected local evaluation log. Do not publish raw reports or credentials.
 6. Calculate metrics from the reviewed labels. Do not treat a model's self-reported confidence or reasoning as independent ground truth.
 

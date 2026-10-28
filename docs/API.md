@@ -1,11 +1,11 @@
 # Local API Guide
 
-The API is served by `python server.py` on `http://127.0.0.1:8000`. Every `/api/*` route requires `Authorization: Bearer <MIZAN_JUDGE_TOKEN>`. The shared token grants full access to all cases and actions; it is not a separate account for each judge. The server still binds to loopback and is not designed for public or multi-user use. Examples use loopback only. Do not change the host to a vulnerability target. JSON request bodies must use `Content-Type: application/json`.
+Run Mizan with `python3 server.py` or `docker compose up --build`. The local UI and API are available at `http://127.0.0.1:8000`. Docker Compose publishes on loopback only. Every `/api/*` route requires `Authorization: Bearer <MIZAN_JUDGE_TOKEN>`. The token is generated per installation and grants full access to that installation's cases; it is not an individual user account. Each researcher should run a separate instance and configure their own provider key. Do not expose this local API publicly. JSON request bodies must use `Content-Type: application/json`.
 
-Read the token without echoing it, then reuse the header array for the commands below (Bash):
+Create the local token with `python3 scripts/bootstrap.py`. It is printed once when generated and stored in the private `.env` file. Read the token without echoing it, then reuse the header array below (Bash):
 
 ```bash
-read -rsp 'Judge token: ' TOKEN; printf '\n'
+read -rsp 'Local Mizan token: ' TOKEN; printf '\n'
 AUTH=(-H "Authorization: Bearer $TOKEN")
 ```
 
@@ -14,12 +14,13 @@ Do not put the token in a URL, issue, screenshot, or source file. Clear the shel
 ## Health and queue
 
 ```bash
+curl http://127.0.0.1:8000/healthz
 curl "${AUTH[@]}" http://127.0.0.1:8000/api/health
 curl "${AUTH[@]}" 'http://127.0.0.1:8000/api/reports?status=received&limit=25'
 curl "${AUTH[@]}" http://127.0.0.1:8000/api/metrics
 ```
 
-The health response includes `ok`, a boolean `has_key`, and the storage type. It never returns either secret. List results are bounded summaries; they do not include full report or source-code bodies. Metrics contain counts only.
+`GET /healthz` is unauthenticated for container health checks and returns only `{"ok":true}`. It reveals no case data or provider-key status. The authenticated API health response includes `ok`, a boolean `has_key`, and the storage type; it never returns either secret. List results are bounded summaries and metrics contain counts only.
 
 ## Save a report locally
 
@@ -35,14 +36,14 @@ The returned `report.id` is a UUID. The new case has `status: "received"`, `anal
 
 ## Request an AI recommendation
 
-This workflow route sends report/code to the configured Meta Model API. The UI requires an explicit confirmation, and the API also requires the exact boolean `confirm_egress: true` so an empty request cannot accidentally trigger egress:
+This route sends report/code to the locally configured Meta Model API using the installer's own provider key. The UI requires explicit confirmation, and the API also requires `confirm_egress: true`:
 
 ```bash
 curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports/CASE_ID/analyze \
   -H 'Content-Type: application/json' -d '{"confirm_egress":true}'
 ```
 
-The result stores an `analysis` and `suggested_decision`; it does not set a final human disposition. A model key must be configured. If the model call fails, the report remains stored and the browser receives a sanitized error.
+The result stores an `analysis` and `suggested_decision`; it does not set a final human disposition. If the provider key is absent or the model call fails, the report remains stored and the browser receives a sanitized error. The researcher is responsible for their provider charges and for ensuring the report may be sent to that endpoint.
 
 ## Record a human disposition
 
@@ -54,7 +55,7 @@ curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports/CASE_ID/review \
   -d '{"decision":"need-info","reviewer":"Reviewer A","note":"Check route-level authorization before confirming."}'
 ```
 
-Valid decisions are `accept`, `need-info`, `duplicate`, and `reject`. Reviews are recorded in the local event history. No ticket or message is sent.
+Valid decisions are `accept`, `need-info`, `duplicate`, and `reject`. Reviews are recorded in local event history. No ticket or message is sent.
 
 ## Read and delete a case
 
@@ -68,7 +69,7 @@ Deletion removes the case and its application-level event history from the confi
 
 ## Stateless compatibility and canned examples
 
-`POST /api/triage` remains available for compatibility. Send `{ "demo": "injection", "lang": "en" }` for a bundled canned result without a model call, or send `{ "report": "...", "code": "...", "lang": "en", "confirm_egress": true }` to request stateless live analysis. Both calls still require the Bearer header. The persisted workflow is preferred because it separates intake, model analysis, and human review.
+`POST /api/triage` remains available for compatibility. Send `{ "demo": "injection", "lang": "en" }` for a bundled canned result without a model call, or send `{ "report": "...", "code": "...", "lang": "en", "confirm_egress": true }` for stateless live analysis. Both calls still require the Bearer header. The persisted workflow is preferred because it separates intake, model analysis, and human review.
 
 `GET /api/sample?kind=injection&lang=en` returns a synthetic sample input; `kind` may be `injection`, `valid`, or `noise`, and `lang` may be `en` or `ar`. This route also requires the Bearer header.
 
