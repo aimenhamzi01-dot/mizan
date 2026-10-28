@@ -40,13 +40,27 @@ input[type=text],textarea,select{width:100%;border:1px solid var(--line);border-
 footer{color:var(--muted);font-size:.76rem;margin-top:22px;text-align:center}code{font-family:ui-monospace,monospace;color:#b7d2ff}
 @media(max-width:950px){.workspace{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:560px){.shell{padding:18px 12px 36px}.topbar{align-items:flex-start;flex-direction:column}.top-actions{justify-content:flex-start}.metrics{gap:8px}.metric{padding:12px}.metric b{font-size:1.35rem}.card{padding:14px}.result-grid{grid-template-columns:1fr}.result-cell.wide{grid-column:auto}.notice{font-size:.84rem}}
+.auth-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:18px;background:rgba(3,8,16,.88);backdrop-filter:blur(8px)}
+.auth-card{width:min(100%,430px);padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.auth-card h2{margin:0 0 8px}.auth-card p{color:var(--muted);font-size:.86rem}.auth-card input{width:100%;margin:8px 0 12px}.auth-card button{width:100%}.auth-message{min-height:1.4em;color:#ffc6c6!important;margin-bottom:0}
 </style>
 </head>
 <body>
+<div id="authGate" class="auth-overlay" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+  <form id="authForm" class="auth-card">
+    <h2 id="authTitle">Judge access</h2>
+    <p>Enter the private judge token to unlock the Mizan workbench. The token is sent in an Authorization header and kept in browser memory only.</p>
+    <label for="judgeToken">Access token</label>
+    <input id="judgeToken" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" required aria-describedby="authHint authMessage">
+    <p id="authHint">Lock or reload this page to clear the token. Do not share it in a public issue or URL.</p>
+    <button id="unlockButton" class="btn primary" type="submit">Unlock workbench</button>
+    <p id="authMessage" class="auth-message" role="status" aria-live="polite"></p>
+  </form>
+</div>
 <div class="shell">
   <header class="topbar">
     <div class="brand"><div class="mark" aria-hidden="true">M</div><div><h1>Mizan</h1><div class="subtitle">Security report triage · Human review workbench</div></div></div>
-    <div class="top-actions"><span class="pill"><span class="dot online"></span>Local-only server</span><span class="pill" id="apiStatus"><span class="dot"></span>Checking model API</span></div>
+    <div class="top-actions"><span class="pill"><span class="dot online"></span>Local-only server</span><span class="pill" id="apiStatus"><span class="dot"></span>Judge sign-in required</span><button id="lockBtn" class="btn small ghost" type="button" hidden>Lock</button></div>
   </header>
 
   <div class="notice" role="note">
@@ -89,11 +103,11 @@ footer{color:var(--muted);font-size:.76rem;margin-top:22px;text-align:center}cod
       <div id="detail" hidden></div>
     </section>
   </main>
-  <footer>Mizan is a local prototype. Do not expose this unauthenticated server to an untrusted network. Human reviewers remain responsible for every final disposition.</footer>
+  <footer>Mizan is a local prototype. Token authentication does not make this server safe for public-network deployment. Human reviewers remain responsible for every final disposition.</footer>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
-const state = {hasKey:false, selectedId:null, reports:[], flashTimer:null};
+const state = {hasKey:false, selectedId:null, reports:[], flashTimer:null, token:""};
 const decisionLabels = {accept:"Accept", "need-info":"Need info", duplicate:"Duplicate", reject:"Reject"};
 
 function node(tag, className, text){
@@ -110,11 +124,24 @@ function flash(message, kind="success"){
 async function api(path, options={}){
   const headers = Object.assign({}, options.headers || {});
   if(options.body !== undefined) headers["Content-Type"] = "application/json";
+  if(state.token) headers.Authorization = `Bearer ${state.token}`;
   const response = await fetch(path, Object.assign({}, options, {headers, cache:"no-store"}));
   let body = {};
   try { body = await response.json(); } catch {}
+  if((response.status===401 || response.status===503) && state.token) lockWorkbench("Judge access was rejected or is not configured. Enter a valid token or check the server configuration.");
   if(!response.ok) throw new Error(body.error || `Request failed (${response.status}).`);
   return body;
+}
+function lockWorkbench(message="Enter the private judge token to unlock the workbench."){
+  state.token="";state.hasKey=false;state.selectedId=null;state.reports=[];
+  $("authGate").hidden=false;$("lockBtn").hidden=true;$("judgeToken").value="";
+  $("authMessage").textContent=message;
+  $("caseList").replaceChildren(node("div","empty","Sign in to load protected cases."));
+  $("detail").replaceChildren();$("detail").hidden=true;$("detailEmpty").hidden=false;
+  ["metricTotal","metricReceived","metricAnalyzed","metricReviewed"].forEach(id=>$(id).textContent="—");
+  $("newReportForm").reset();setCounts();
+  const badge=$("apiStatus");badge.replaceChildren(node("span","dot"),document.createTextNode("Judge sign-in required"));
+  if(message) $("judgeToken").focus();
 }
 function formatDate(value){
   if(!value) return "";
@@ -125,12 +152,14 @@ function setCounts(){
   $("reportCount").textContent = String($("reportInput").value.length);
   $("codeCount").textContent = String($("codeInput").value.length);
 }
+function renderHealth(health){
+  state.hasKey = Boolean(health.has_key);
+  const badge = $("apiStatus"); badge.replaceChildren();
+  const dot = node("span", "dot" + (state.hasKey ? " online" : "")); badge.append(dot, document.createTextNode(state.hasKey ? "Meta API configured" : "No Meta API key"));
+}
 async function loadHealth(){
-  try{
-    const health = await api("/api/health"); state.hasKey = Boolean(health.has_key);
-    const badge = $("apiStatus"); badge.replaceChildren();
-    const dot = node("span", "dot" + (state.hasKey ? " online" : "")); badge.append(dot, document.createTextNode(state.hasKey ? "Meta API configured" : "Demo mode · no API key"));
-  }catch(e){ $("apiStatus").textContent = "Local API unavailable"; }
+  try{ renderHealth(await api("/api/health")); }
+  catch(e){ $("apiStatus").textContent = "Local API unavailable"; }
 }
 async function loadMetrics(){
   try{
@@ -288,7 +317,17 @@ $("statusFilter").addEventListener("change",loadReports);
 let searchTimer=null;$("searchInput").addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(loadReports,250);});
 document.querySelectorAll("[data-sample]").forEach(button=>button.addEventListener("click",()=>loadSample(button.dataset.sample)));
 
-loadHealth();refreshAll(null);setCounts();
+$("authForm").addEventListener("submit",async e=>{
+  e.preventDefault();const token=$("judgeToken").value.trim();if(!token){$("authMessage").textContent="Enter the judge token.";return;}
+  const button=$("unlockButton");button.disabled=true;state.token=token;$("authMessage").textContent="Checking token…";
+  try{
+    const health=await api("/api/health");renderHealth(health);$("authGate").hidden=true;$("lockBtn").hidden=false;$("judgeToken").value="";$("authMessage").textContent="";
+    await refreshAll(null);flash("Judge access verified. The token remains in memory until you lock or reload this page.");
+  }catch(err){state.token="";$("authGate").hidden=false;$("lockBtn").hidden=true;$("judgeToken").value="";$("authMessage").textContent="Access was not granted. Check the token and server configuration.";}
+  finally{button.disabled=false;if(!$("authGate").hidden) $("judgeToken").focus();}
+});
+$("lockBtn").addEventListener("click",()=>lockWorkbench());
+setCounts();$("judgeToken").focus();
 </script>
 </body>
 </html>

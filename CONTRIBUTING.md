@@ -18,7 +18,8 @@ Thanks for helping improve Mizan. Keep changes focused, tested offline, and cons
 - Keep model analysis advisory. A final disposition requires an explicit human action and is stored separately from the model suggestion.
 - Do not add automatic ticket closure, disclosure, reporter messaging, or target access.
 - Keep credentials in environment configuration; never return secrets or provider error bodies to the browser/logs.
-- Preserve loopback-only deployment unless a separate authenticated and reviewed network deployment design is approved.
+- Keep `MIZAN_JUDGE_TOKEN` fail-closed, require at least 32 bytes, compare credentials in constant time, and never log or persist the browser token.
+- Preserve loopback-only deployment. A shared token is not per-user authorization; any network deployment needs HTTPS, rate limiting, database/privacy protections, and a separate security review.
 
 ## Pull requests
 

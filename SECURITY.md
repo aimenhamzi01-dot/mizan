@@ -5,6 +5,9 @@ Mizan is a local, read-only triage workbench. It stores report text and optional
 ## Data flow and storage
 
 - Saving a case writes its report and optional code to a local SQLite database. The default path is `data/mizan.sqlite3`; `MIZAN_DB_PATH` can select another local path. The database is not encrypted by this application.
+- Every `/api/*` route requires `Authorization: Bearer <MIZAN_JUDGE_TOKEN>`. The server accepts only a configured token at least 32 bytes long and fails closed if it is missing or too short. Comparisons use constant-time digest comparison. The token is not returned or logged.
+- The judge token is shared and grants full API access, including reading and deleting every case. It does not provide per-judge identity, roles, individual revocation, expiration, or rate limiting. Rotate the server-side token to revoke all copies and distribute it only through a private channel.
+- The UI keeps the entered token in JavaScript memory only; it is sent in the Authorization header and is cleared when the page is locked or reloaded. It is not placed in a URL, cookie, `localStorage`, or `sessionStorage`.
 - Saving a case does not call a model. A separate, explicit **Analyze with Meta** action sends that case's report and source snippet to the configured Meta Model API. Reviewers must confirm this egress in the interface first; live API routes also require `confirm_egress: true`.
 - Built-in examples return bundled canned results and do not call the model.
 - Cases remain in the local database until deleted through the workbench or the database file is removed. Deleting a case also removes its application-level event history. Users remain responsible for backups and any copies outside Mizan.
@@ -18,7 +21,7 @@ These controls reduce risk but do not make model output infallible. Review all e
 
 ## Deployment boundary
 
-The included server binds to `127.0.0.1` and checks local `Host`/`Origin` headers to reduce browser-based DNS-rebinding and cross-origin requests. It still has no user authentication, per-user authorization, comprehensive CSRF defense, TLS termination, or production deployment controls. Do not expose it to an untrusted network or store regulated/sensitive production data in it. The local SQLite file is plaintext. Before a network or multi-user deployment, a separate security review and hardening project is required.
+The included server binds to `127.0.0.1` and checks local `Host`/`Origin` headers. Bearer authentication protects every API route, but this single shared token is not a multi-user authorization system. There is no TLS termination, rate limiting, per-reviewer identity, or production deployment hardening. Do not expose the server directly to an untrusted network or store regulated/sensitive production data in it. The local SQLite file is plaintext. Any network-accessible judge demo needs HTTPS, controlled hosting, rate limits, database protections, and a separate security review.
 
 Mizan does not test a reported system. Do not add exploit execution, automated target access, or auto-applied decisions as extensions to this project.
 

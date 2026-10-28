@@ -36,6 +36,9 @@ GOOD = {
 class WorkbenchAPITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.auth_token = "mizan-test-judge-token-0123456789abcdef"
+        cls.auth_env = patch.dict(os.environ, {"MIZAN_JUDGE_TOKEN": cls.auth_token})
+        cls.auth_env.start()
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.server.server_address[1]
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -51,16 +54,19 @@ class WorkbenchAPITests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join(timeout=2)
+        cls.auth_env.stop()
 
     def tearDown(self):
         self.env.stop()
         self.temp_dir.cleanup()
 
-    def request(self, path, body=None, method="GET", content_type="application/json", extra_headers=None):
+    def request(self, path, body=None, method="GET", content_type="application/json", extra_headers=None, auth=True):
         data = None if body is None else (body if isinstance(body, bytes) else json.dumps(body).encode("utf-8"))
         headers = {}
         if content_type:
             headers["Content-Type"] = content_type
+        if auth:
+            headers["Authorization"] = "Bearer " + self.auth_token
         headers.update(extra_headers or {})
         req = Request("http://127.0.0.1:%d%s" % (self.port, path), data=data, headers=headers, method=method)
         try:
@@ -85,6 +91,43 @@ class WorkbenchAPITests(unittest.TestCase):
         metrics = json.loads(body)
         self.assertNotIn("report", metrics)
         self.assertNotIn("code", metrics)
+
+    def test_api_requires_valid_bearer_token_and_does_not_create_unauthorized_case(self):
+        status, headers, body = self.request("/api/health", auth=False)
+        self.assertEqual(status, 401)
+        self.assertIn("Bearer", headers.get("WWW-Authenticate", ""))
+        self.assertNotIn(b"test-judge-token", body)
+        status, _, _ = self.request(
+            "/api/health", extra_headers={"Authorization": "Bearer incorrect-token-value"}
+        )
+        self.assertEqual(status, 401)
+        status, _, _ = self.request(
+            "/api/reports",
+            {"report": "must not persist without auth", "code": "", "lang": "en"},
+            method="POST",
+            auth=False,
+        )
+        self.assertEqual(status, 401)
+        status, _, body = self.request("/api/reports")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["reports"], [])
+
+    def test_api_fails_closed_when_judge_token_is_missing_or_too_short(self):
+        with patch.dict(os.environ):
+            os.environ.pop("MIZAN_JUDGE_TOKEN", None)
+            status, _, _ = self.request("/api/health", auth=False)
+            self.assertEqual(status, 503)
+        with patch.dict(os.environ, {"MIZAN_JUDGE_TOKEN": "short"}):
+            status, _, _ = self.request("/api/health", auth=False)
+            self.assertEqual(status, 503)
+
+    def test_static_login_gate_is_available_before_api_authentication(self):
+        status, _, body = self.request("/", auth=False)
+        self.assertEqual(status, 200)
+        self.assertIn(b"authGate", body)
+        self.assertIn(b"Authorization", body)
+        self.assertNotIn(b"localStorage", body)
+        self.assertNotIn(b"sessionStorage", body)
 
     def test_report_is_saved_without_calling_model_and_human_decision_is_empty(self):
         with patch.object(meta_client, "chat", side_effect=AssertionError("model call must not happen")):

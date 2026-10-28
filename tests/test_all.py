@@ -1,5 +1,6 @@
 import json, os, sys, threading, unittest, urllib.request, urllib.error
 from http.server import ThreadingHTTPServer
+from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import meta_client, server, triage
@@ -122,18 +123,22 @@ class TriageFlow(unittest.TestCase):
 class HttpServer(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.auth_token = "mizan-test-judge-token-0123456789abcdef"
+        cls._auth_env = patch.dict(os.environ, {"MIZAN_JUDGE_TOKEN": cls.auth_token})
+        cls._auth_env.start()
         cls.srv = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.srv.server_address[1]
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
         cls._orig = meta_client.chat
     @classmethod
-    def tearDownClass(cls): cls.srv.shutdown(); meta_client.chat = cls._orig
+    def tearDownClass(cls):
+        cls.srv.shutdown(); cls.srv.server_close(); meta_client.chat = cls._orig; cls._auth_env.stop()
 
     def call(self, path, body=None, method=None):
         req = urllib.request.Request(
             "http://127.0.0.1:%d%s" % (self.port, path),
             data=None if body is None else json.dumps(body).encode(),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "Authorization": "Bearer " + self.auth_token},
             method=method,
         )
         try:

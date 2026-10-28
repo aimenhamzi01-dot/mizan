@@ -1,5 +1,7 @@
 """Mizan local review workbench. Start with `python server.py`."""
 import json
+import hashlib
+import hmac
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,7 +36,7 @@ SAFE_MODEL_ERROR = "Model analysis failed. Check the local configuration and try
 class Handler(BaseHTTPRequestHandler):
     server_version = "Mizan"
 
-    def _send(self, status, body, ctype="application/json; charset=utf-8"):
+    def _send(self, status, body, ctype="application/json; charset=utf-8", headers=None):
         if not isinstance(body, bytes):
             body = json.dumps(body, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -51,6 +53,8 @@ class Handler(BaseHTTPRequestHandler):
             "style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; "
             "font-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
         )
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -84,6 +88,42 @@ class Handler(BaseHTTPRequestHandler):
             if not allowed:
                 self._send(403, {"error": "Local origin only."})
                 return False
+        return True
+
+    def _guard_api_token(self):
+        if not urlsplit(self.path).path.startswith("/api/"):
+            return True
+        configured = os.environ.get("MIZAN_JUDGE_TOKEN", "").strip()
+        configured_bytes = configured.encode("utf-8")
+        if len(configured_bytes) < 32:
+            if self.command in {"POST", "PUT", "PATCH"}:
+                self.close_connection = True
+            self._send(503, {"error": "Judge API authentication is not configured."})
+            return False
+
+        values = self.headers.get_all("Authorization", [])
+        header = values[0] if len(values) == 1 else ""
+        scheme, separator, candidate = header.partition(" ")
+        well_formed = (
+            len(values) == 1
+            and bool(separator)
+            and scheme.lower() == "bearer"
+            and bool(candidate)
+            and candidate == candidate.strip()
+            and not any(char.isspace() for char in candidate)
+        )
+        supplied_digest = hashlib.sha256(candidate.encode("utf-8")).digest()
+        expected_digest = hashlib.sha256(configured_bytes).digest()
+        valid = hmac.compare_digest(expected_digest, supplied_digest) and well_formed
+        if not valid:
+            if self.command in {"POST", "PUT", "PATCH"}:
+                self.close_connection = True
+            self._send(
+                401,
+                {"error": "A valid judge Bearer token is required."},
+                headers={"WWW-Authenticate": 'Bearer realm="Mizan"'},
+            )
+            return False
         return True
 
     def _json_body(self):
@@ -131,6 +171,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if not self._guard_local_origin():
+            return
+        if not self._guard_api_token():
             return
         parsed = urlsplit(self.path)
         path = parsed.path
@@ -188,6 +230,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self._guard_local_origin():
+            return
+        if not self._guard_api_token():
             return
         try:
             payload = self._json_body()
@@ -255,6 +299,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         if not self._guard_local_origin():
             return
+        if not self._guard_api_token():
+            return
         parsed = urlsplit(self.path)
         report_id, action = self._report_path(parsed.path)
         if not report_id or action is not None:
@@ -272,20 +318,28 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         if not self._guard_local_origin():
             return
+        if not self._guard_api_token():
+            return
         self._send(405, {"error": "Method not allowed."})
 
     def do_PATCH(self):
         if not self._guard_local_origin():
+            return
+        if not self._guard_api_token():
             return
         self._send(405, {"error": "Method not allowed."})
 
     def do_OPTIONS(self):
         if not self._guard_local_origin():
             return
+        if not self._guard_api_token():
+            return
         self._send(405, {"error": "Method not allowed."})
 
     def do_HEAD(self):
         if not self._guard_local_origin():
+            return
+        if not self._guard_api_token():
             return
         self._send(405, {"error": "Method not allowed."})
 
