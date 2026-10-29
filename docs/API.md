@@ -104,6 +104,28 @@ curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports/CASE_ID/analyze \
 
 The selected report and source snippet are sent to the configured `META_API_BASE`. The analysis stores a model recommendation and never sets a human disposition. Saving a report alone is always local-only.
 
+Each analysis includes an `evidence` array. Every item has `source` (`report` or `code`), an exact `quote`, a `relation` (`supports`, `contradicts`, or `context-needed`), a short explanation, and a server-computed `verified` flag. The server checks that the full quote is present in the stated input. If any quote is missing, malformed, or attributed to the wrong source, `citation_integrity` is `unverified` and the suggested decision is downgraded to `need-info`. `missing_context` lists questions that could change the assessment.
+
+Example excerpt:
+
+```json
+{
+  "citation_integrity": "verified",
+  "evidence": [
+    {
+      "source": "code",
+      "quote": "invoice = Invoice.objects.get(id=invoice_id)",
+      "relation": "supports",
+      "explanation": "The shown lookup is by id, without a user scope in this function.",
+      "verified": true
+    }
+  ],
+  "missing_context": ["Check whether outer middleware scopes this route."]
+}
+```
+
+`verified` means only that the text matches the supplied source exactly. It does not establish semantic relevance, truth, reachability, or completeness; the reviewer must inspect the surrounding code and make the final decision.
+
 `POST /api/triage` remains available for stateless compatibility. Synthetic canned results can be requested with `{ "demo":"injection", "lang":"en" }`. A live call requires analyst/admin role, the user's own key (or owner-only fallback), and `confirm_egress: true`.
 
 ## Record a human disposition

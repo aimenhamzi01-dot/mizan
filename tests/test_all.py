@@ -5,32 +5,41 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import meta_client, server, triage
 
+GOOD_REPORT = "IDOR on invoice endpoint"
+GOOD_CODE = "invoice = Invoice.objects.get(id=invoice_id)"
 GOOD = {
     "claim": "IDOR on invoice endpoint", "component": "GET /api/invoices/{id}",
     "claimed_impact": "data leak", "repro_steps": ["login", "request other id"],
     "injection_attempts": [], "noise": "specific", "code_verification": "supported",
     "code_evidence": "no ownership check", "severity": "high", "severity_reasoning": "clear leak",
+    "evidence": [
+        {"source": "report", "quote": GOOD_REPORT, "relation": "supports", "explanation": "Reported claim."},
+        {"source": "code", "quote": GOOD_CODE, "relation": "supports", "explanation": "ID lookup."},
+    ],
+    "missing_context": [],
     "decision": "accept", "decision_reasoning": "supported by code", "draft_reply": "Thanks, accepted.",
 }
 
 
 class Normalize(unittest.TestCase):
     def test_passthrough_valid(self):
-        r = triage.normalize(GOOD)
+        r = triage.normalize(GOOD, GOOD_REPORT, GOOD_CODE)
         self.assertEqual(r["decision"], "accept")
         self.assertEqual(r["severity"], "high")
+        self.assertEqual(r["citation_integrity"], "verified")
+        self.assertTrue(all(item["verified"] for item in r["evidence"]))
 
     def test_contradicted_cannot_be_accepted(self):
         d = dict(GOOD, code_verification="contradicted", decision="accept")
-        self.assertEqual(triage.normalize(d)["decision"], "reject")
+        self.assertEqual(triage.normalize(d, GOOD_REPORT, GOOD_CODE)["decision"], "reject")
 
     def test_scanner_dump_cannot_be_accepted(self):
         d = dict(GOOD, noise="scanner-dump", decision="accept")
-        self.assertEqual(triage.normalize(d)["decision"], "need-info")
+        self.assertEqual(triage.normalize(d, GOOD_REPORT, GOOD_CODE)["decision"], "need-info")
 
     def test_bad_enums_fall_back_safely(self):
         d = dict(GOOD, decision="auto-exploit", severity="apocalyptic", noise="??", code_verification="trust-me")
-        r = triage.normalize(d)
+        r = triage.normalize(d, GOOD_REPORT, GOOD_CODE)
         self.assertEqual(r["decision"], "need-info")
         self.assertEqual(r["severity"], "none")
         self.assertEqual(r["noise"], "generic")
@@ -38,15 +47,35 @@ class Normalize(unittest.TestCase):
 
     def test_lists_are_capped(self):
         d = dict(GOOD, repro_steps=["x"] * 50, injection_attempts=["y"] * 50)
-        r = triage.normalize(d)
+        r = triage.normalize(d, GOOD_REPORT, GOOD_CODE)
         self.assertLessEqual(len(r["repro_steps"]), 20)
         self.assertLessEqual(len(r["injection_attempts"]), 10)
 
     def test_non_list_inputs_become_empty(self):
         d = dict(GOOD, repro_steps="not a list", injection_attempts=None)
-        r = triage.normalize(d)
+        r = triage.normalize(d, GOOD_REPORT, GOOD_CODE)
         self.assertEqual(r["repro_steps"], [])
         self.assertEqual(r["injection_attempts"], [])
+
+    def test_fabricated_quote_downgrades_recommendation(self):
+        d = json.loads(json.dumps(GOOD))
+        d["evidence"][1]["quote"] = "request.user.is_admin"
+        result = triage.normalize(d, GOOD_REPORT, GOOD_CODE)
+        self.assertEqual(result["citation_integrity"], "unverified")
+        self.assertEqual(result["decision"], "need-info")
+        self.assertFalse(result["evidence"][1]["verified"])
+
+    def test_quote_from_wrong_source_is_not_verified(self):
+        d = json.loads(json.dumps(GOOD))
+        d["evidence"][0]["source"] = "code"
+        result = triage.normalize(d, GOOD_REPORT, GOOD_CODE)
+        self.assertEqual(result["citation_integrity"], "unverified")
+        self.assertEqual(result["decision"], "need-info")
+
+    def test_missing_evidence_and_malformed_evidence_fail_closed(self):
+        self.assertEqual(triage.normalize({"decision": "accept"}, GOOD_REPORT, GOOD_CODE)["decision"], "need-info")
+        d = dict(GOOD, evidence=[{"source": [], "quote": "x", "relation": [], "explanation": "bad"}])
+        self.assertEqual(triage.normalize(d, GOOD_REPORT, GOOD_CODE)["decision"], "need-info")
 
 
 class ExtractJson(unittest.TestCase):
@@ -106,7 +135,7 @@ class TriageFlow(unittest.TestCase):
         def fake(messages, **kw):
             calls.append(1); return "oops" if len(calls) == 1 else json.dumps(GOOD)
         meta_client.chat = fake
-        self.assertEqual(triage.triage("r", lang="en")["decision"], "accept")
+        self.assertEqual(triage.triage(GOOD_REPORT, code=GOOD_CODE, lang="en")["decision"], "accept")
         self.assertEqual(len(calls), 2)
 
     def test_gives_up_after_two_bad_replies(self):
@@ -157,6 +186,8 @@ class HttpServer(unittest.TestCase):
             for lang in ("ar", "en"):
                 s, b = self.call("/api/triage", {"demo": kind, "lang": lang}); self.assertEqual(s, 200)
                 d = json.loads(b); self.assertIn("decision", d)
+                self.assertEqual(d["citation_integrity"], "verified", (kind, lang, d["evidence"]))
+                self.assertTrue(all(item["verified"] for item in d["evidence"]))
                 s, b = self.call("/api/sample?kind=%s&lang=%s" % (kind, lang), None, "GET")
                 self.assertEqual(s, 200); self.assertIn("report", json.loads(b))
 
@@ -168,8 +199,12 @@ class HttpServer(unittest.TestCase):
 
     def test_real_path_with_mocked_model(self):
         meta_client.chat = lambda m, **kw: json.dumps(GOOD)
-        s, b = self.call("/api/triage", {"report": "an actual report", "lang": "en", "confirm_egress": True})
-        self.assertEqual(s, 200); self.assertEqual(json.loads(b)["decision"], "accept")
+        s, b = self.call("/api/triage", {
+            "report": GOOD_REPORT, "code": GOOD_CODE, "lang": "en", "confirm_egress": True,
+        })
+        self.assertEqual(s, 200)
+        self.assertEqual(json.loads(b)["decision"], "accept")
+        self.assertEqual(json.loads(b)["citation_integrity"], "verified")
 
     def test_live_triage_requires_egress_confirmation(self):
         meta_client.chat = lambda m, **kw: self.fail("model must not be called without confirmation")

@@ -14,10 +14,11 @@ Built for the **Meta Global AI Developer Hackathon 2026**, Indie Developer Track
 - Roles: **installation owner** (global administrator), **workspace admin** (manage members in one workspace), **analyst** (submit and analyze), **reviewer** (review and disposition), and **viewer** (read only).
 - Each researcher can store a personal Meta API key; it is encrypted at rest with AES-GCM using an installation key. No researcher key is shared by Mizan.
 - Explicit confirmation before any case content is sent to the configured Meta-compatible endpoint.
+- Evidence trail for each analysis: report/code excerpts are shown with source labels, and the server checks each quote is an exact substring of the stated input. A failed quote check downgrades the recommendation to `need-info`.
 - Searchable queue, aggregate metrics, audit events, human dispositions separate from model recommendations, and local deletion.
 - Synthetic examples; English interface with English/Arabic report-analysis language selection.
 
-Mizan never executes submitted code or exploits and never contacts a reported target. Model recommendations remain advisory; a human must record any disposition.
+Mizan never executes submitted code or exploits and never contacts a reported target. Quote matching confirms text presence only; it does not prove relevance, truth, reachability, or that the excerpt is complete. Model recommendations remain advisory; a human must record any disposition.
 
 ## Quick start: private local installation
 
@@ -116,7 +117,7 @@ All `/api/*` routes require a valid `Authorization: Bearer <token>` header. The 
 
 ## Safety and limitations
 
-Mizan is a self-hosted prototype, not a vulnerability validator or a production SaaS. It does not implement password login, MFA, session cookies, automatic token expiry, database encryption, automatic retention, or TLS termination. Review the deployment and privacy boundaries in [SECURITY.md](SECURITY.md) before enabling private team access.
+Mizan is a self-hosted prototype, not a vulnerability validator or a production SaaS. Evidence citations are checked for exact text presence, not semantic correctness. It does not implement password login, MFA, session cookies, automatic token expiry, database encryption, automatic retention, or TLS termination. Review the deployment and privacy boundaries in [SECURITY.md](SECURITY.md) before enabling private team access.
 
 ## Tests and CI
 

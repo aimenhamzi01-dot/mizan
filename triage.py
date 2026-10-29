@@ -1,4 +1,4 @@
-"""Core logic: run a report through Muse Spark, sanitize and structure the verdict."""
+"""Core logic: run a report through Muse Spark and verify cited source excerpts."""
 import json
 import re
 
@@ -13,6 +13,10 @@ NOISE = {"specific", "generic", "scanner-dump"}
 VERIFY = {"supported", "unverifiable", "contradicted"}
 SEVERITY = {"none", "low", "medium", "high", "critical"}
 DECISION = {"accept", "need-info", "duplicate", "reject"}
+EVIDENCE_SOURCES = {"report", "code"}
+EVIDENCE_RELATIONS = {"supports", "contradicts", "context-needed"}
+MAX_EVIDENCE_ITEMS = 8
+MAX_EVIDENCE_QUOTE = 500
 
 
 def lang_name(code):
@@ -34,17 +38,68 @@ def _list_of_str(v, limit, item_limit):
     return [str(x)[:item_limit] for x in v][:limit]
 
 
-def normalize(data):
-    noise = data.get("noise") if data.get("noise") in NOISE else "generic"
-    verify = data.get("code_verification") if data.get("code_verification") in VERIFY else "unverifiable"
-    severity = data.get("severity") if data.get("severity") in SEVERITY else "none"
-    decision = data.get("decision") if data.get("decision") in DECISION else "need-info"
+def _verified_evidence(data, report, code):
+    raw = data.get("evidence")
+    if not isinstance(raw, list):
+        return [], False
 
-    # guardrail: a contradicted claim, or report with no real evidence, cannot be auto-"accept"
+    result = []
+    structurally_valid = bool(raw) and len(raw) <= MAX_EVIDENCE_ITEMS
+    for item in raw[:MAX_EVIDENCE_ITEMS]:
+        if not isinstance(item, dict):
+            structurally_valid = False
+            continue
+        source = item.get("source")
+        relation = item.get("relation")
+        raw_quote = item.get("quote")
+        explanation = item.get("explanation")
+        source_valid = isinstance(source, str) and source in EVIDENCE_SOURCES
+        relation_valid = isinstance(relation, str) and relation in EVIDENCE_RELATIONS
+        quote_valid = isinstance(raw_quote, str) and 0 < len(raw_quote) <= MAX_EVIDENCE_QUOTE
+        if not (source_valid and relation_valid and quote_valid):
+            structurally_valid = False
+        quote = raw_quote[:MAX_EVIDENCE_QUOTE] if isinstance(raw_quote, str) else ""
+        source_text = report if source == "report" else code if source == "code" else ""
+        verified = bool(quote_valid and quote.strip() and source_text and quote in source_text)
+        if not verified:
+            structurally_valid = False
+        result.append({
+            "source": source if source_valid else "unknown",
+            "quote": quote,
+            "relation": relation if relation_valid else "context-needed",
+            "explanation": str(explanation or "")[:400],
+            "verified": verified,
+        })
+    integrity = structurally_valid and bool(result) and all(item["verified"] for item in result)
+    return result, integrity
+
+
+def normalize(data, report="", code=""):
+    if not isinstance(data, dict):
+        data = {}
+    report = report if isinstance(report, str) else ""
+    code = code if isinstance(code, str) else ""
+    noise_value = data.get("noise")
+    verify_value = data.get("code_verification")
+    severity_value = data.get("severity")
+    decision_value = data.get("decision")
+    noise = noise_value if isinstance(noise_value, str) and noise_value in NOISE else "generic"
+    verify = verify_value if isinstance(verify_value, str) and verify_value in VERIFY else "unverifiable"
+    severity = severity_value if isinstance(severity_value, str) and severity_value in SEVERITY else "none"
+    decision = decision_value if isinstance(decision_value, str) and decision_value in DECISION else "need-info"
+    evidence, citations_verified = _verified_evidence(data, report, code)
+
+    # Hard guardrails stay server-side. A literal text match is only citation
+    # integrity; it does not establish semantic relevance or report truth.
     if verify == "contradicted" and decision == "accept":
         decision = "reject"
     if noise == "scanner-dump" and decision == "accept":
         decision = "need-info"
+    decision_reasoning = str(data.get("decision_reasoning", ""))[:500]
+    if not citations_verified:
+        decision = "need-info"
+        caveat = " Mizan could not verify every evidence quote against its stated source; the recommendation was downgraded."
+        decision_reasoning = (decision_reasoning + caveat).strip()[:500]
 
     return {
         "claim": str(data.get("claim", ""))[:600],
@@ -55,10 +110,13 @@ def normalize(data):
         "noise": noise,
         "code_verification": verify,
         "code_evidence": str(data.get("code_evidence", ""))[:800],
+        "evidence": evidence,
+        "citation_integrity": "verified" if citations_verified else "unverified",
+        "missing_context": _list_of_str(data.get("missing_context"), 12, 300),
         "severity": severity,
         "severity_reasoning": str(data.get("severity_reasoning", ""))[:500],
         "decision": decision,
-        "decision_reasoning": str(data.get("decision_reasoning", ""))[:500],
+        "decision_reasoning": decision_reasoning,
         "draft_reply": str(data.get("draft_reply", ""))[:1200],
     }
 
@@ -94,9 +152,9 @@ def triage(report, code=None, lang="en", *, api_key=None):
 
     last_err = None
     for _ in range(2):
-        reply = meta_client.chat(messages, api_key=api_key, max_tokens=2500, temperature=0.1)
+        reply = meta_client.chat(messages, api_key=api_key, max_tokens=3500, temperature=0.1)
         try:
-            return normalize(extract_json(reply))
+            return normalize(extract_json(reply), report, code)
         except (ValueError, json.JSONDecodeError) as e:
             last_err = e
             messages.append({"role": "assistant", "content": reply})

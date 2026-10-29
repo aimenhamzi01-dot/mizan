@@ -18,6 +18,8 @@ import review_store
 import server
 
 
+GOOD_REPORT = "IDOR: load by id and expose message body"
+GOOD_CODE = "def get_message(request, mid): return Message.objects.get(id=mid)"
 GOOD = {
     "claim": "Possible message IDOR.",
     "component": "GET /api/messages/{message_id}",
@@ -27,6 +29,11 @@ GOOD = {
     "noise": "specific",
     "code_verification": "supported",
     "code_evidence": "The supplied function has no participant check.",
+    "evidence": [
+        {"source": "report", "quote": GOOD_REPORT, "relation": "supports", "explanation": "Reported claim."},
+        {"source": "code", "quote": "Message.objects.get(id=mid)", "relation": "supports", "explanation": "Lookup by requested id."},
+    ],
+    "missing_context": ["Check the route and any surrounding authorization middleware."],
     "severity": "high",
     "severity_reasoning": "Potential confidentiality impact.",
     "decision": "need-info",
@@ -172,8 +179,8 @@ class WorkbenchAPITests(unittest.TestCase):
         self.assertEqual(summary["id"], case["id"])
 
     def test_analysis_uses_mocked_model_and_does_not_become_final_decision(self):
-        report_text = "IDOR: load by id and expose message body"
-        source = "def get_message(request, mid): return Message.objects.get(id=mid)"
+        report_text = GOOD_REPORT
+        source = GOOD_CODE
         case = self.create_case(report_text, source)
         captured = {}
 
@@ -191,6 +198,8 @@ class WorkbenchAPITests(unittest.TestCase):
         self.assertEqual(status, 200)
         result = json.loads(body)["report"]
         self.assertEqual(result["suggested_decision"], "need-info")
+        self.assertEqual(result["analysis"]["citation_integrity"], "verified")
+        self.assertTrue(all(item["verified"] for item in result["analysis"]["evidence"]))
         self.assertIsNone(result["review_decision"])
         system_message, user_message = [message["content"] for message in captured["messages"]]
         self.assertNotIn(report_text, system_message)
@@ -198,6 +207,20 @@ class WorkbenchAPITests(unittest.TestCase):
         self.assertIn(report_text, user_message)
         self.assertIn(source, user_message)
         self.assertIn("read-only", user_message.lower())
+
+    def test_fabricated_model_quote_is_visible_but_downgrades_decision(self):
+        case = self.create_case(GOOD_REPORT, GOOD_CODE)
+        fabricated = json.loads(json.dumps(GOOD))
+        fabricated["evidence"][1]["quote"] = "request.user.id == message.recipient_id"
+        with patch.object(meta_client, "chat", return_value=json.dumps(fabricated)):
+            status, _, body = self.request(
+                "/api/reports/%s/analyze" % case["id"], {"confirm_egress": True}, method="POST"
+            )
+        self.assertEqual(status, 200)
+        analysis = json.loads(body)["report"]["analysis"]
+        self.assertEqual(analysis["citation_integrity"], "unverified")
+        self.assertEqual(analysis["decision"], "need-info")
+        self.assertFalse(analysis["evidence"][1]["verified"])
 
     def test_review_requires_explicit_human_action_and_is_audited(self):
         case = self.create_case()

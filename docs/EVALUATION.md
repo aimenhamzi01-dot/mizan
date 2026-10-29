@@ -2,7 +2,7 @@
 
 ## What the tests establish
 
-The automated suite is offline and deterministic. It checks triage behavior, input/output boundaries, token authentication, role enforcement, workspace isolation, token creation/revocation/rotation, AES-GCM key storage, persistence and workflow state, safe errors, and the hard acceptance guardrails. Model calls are mocked. These tests do **not** establish that Muse Spark correctly classifies real reports, calibrates severity, or improves researcher outcomes.
+The automated suite is offline and deterministic. It checks triage behavior, exact evidence-quote matching and fail-closed behavior, input/output boundaries, token authentication, role enforcement, workspace isolation, token creation/revocation/rotation, AES-GCM key storage, persistence and workflow state, safe errors, and the hard acceptance guardrails. Model calls are mocked. These tests do **not** establish that Muse Spark correctly classifies real reports, calibrates severity, or improves researcher outcomes.
 
 Bundled results are fixed synthetic examples, not a model benchmark. Do not report their pass rate as accuracy.
 
@@ -17,13 +17,15 @@ Use synthetic or explicitly authorized, sanitized reports only. Do not add unred
 | Missing context | Authentication/reachability/impact is asserted but not shown | Does it request evidence instead of inventing it? |
 | Prompt injection | Report contains instruction-like text or fake closing markers | Is it treated as untrusted report content? |
 | Scanner noise | Generic output with no concrete evidence or impact | Does it ask for missing information and avoid overconfidence? |
+| Citation integrity | Model quotes a real excerpt, a fabricated excerpt, and a real excerpt from the wrong input | Are exact matches verified against the stated report/code source, and are failures downgraded to `need-info`? |
+| Evidence relevance | A quote exists but does not logically support the explanation | Does a human catch that literal matching is not semantic verification? |
 | Multilingual input | Equivalent synthetic English and Arabic reports | Are evidence and requested response language consistent? |
 | Severity calibration | Different confidentiality, integrity, and availability consequences | Is severity reasoned from stated impact? |
 | Workspace isolation | Users in different test workspaces try to access one another's synthetic cases | Do list, metrics, details, history, analysis, review, and deletion remain scoped? |
 
 ## Suggested metrics
 
-For a labeled set, calculate recommendation accuracy, confusion matrix, false-accept rate, abstention rate, unsupported-evidence rate, prompt-injection success rate, human-review override rate, and severity agreement. Report sample count, model identifier, prompt version, date, and configuration. A small synthetic set is useful for regression, not field-performance claims.
+For a labeled set, calculate recommendation accuracy, confusion matrix, false-accept rate, abstention rate, quote exact-match rate, wrong-source rate, semantically irrelevant evidence rate (human-labeled), prompt-injection success rate, human-review override rate, and severity agreement. Report sample count, model identifier, prompt version, date, and configuration. Separate the deterministic string-match result from human judgments of relevance and correctness. A small synthetic set is useful for regression, not field-performance claims.
 
 ## Running an evaluation
 

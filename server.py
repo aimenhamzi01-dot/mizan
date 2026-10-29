@@ -296,7 +296,8 @@ class Handler(BaseHTTPRequestHandler):
                 if kind not in SAMPLE_INPUT:
                     self._send(404, {"error": "Unknown sample."})
                     return
-                self._send(200, SAMPLE_INPUT[kind][language])
+                sample = SAMPLE_INPUT[kind][language]
+                self._send(200, sample)
                 return
             if path == "/api/reports":
                 params = parse_qs(parsed.query, keep_blank_values=True)
@@ -381,7 +382,8 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(demo, str) or demo not in DEMOS:
                         self._send(400, {"error": "Unknown demo."})
                         return
-                    self._send(200, DEMOS[demo][language])
+                    sample = SAMPLE_INPUT[demo][language]
+                    self._send(200, triage.normalize(DEMOS[demo][language], sample["report"], sample["code"]))
                     return
                 if not self._require_roles(ANALYZE_ROLES):
                     return
