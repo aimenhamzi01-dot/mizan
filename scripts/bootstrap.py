@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Create private local configuration for a self-hosted Mizan instance."""
+"""Create private owner-token, encryption-key, and Compose settings for Mizan."""
 from __future__ import annotations
 
+import base64
 import os
 import re
 import secrets
@@ -42,8 +43,20 @@ def _write_private(path: Path, text: str) -> None:
             pass
 
 
+def _valid_encryption_key(value: str) -> bool:
+    try:
+        return len(base64.urlsafe_b64decode(value.encode("ascii"))) == 32
+    except Exception:
+        return False
+
+
 def prepare_env(root: Path = ROOT) -> Optional[str]:
-    """Create or harden .env; return a newly generated token only once."""
+    """Create/harden .env; return a newly generated owner token only once.
+
+    The encryption key is never printed. Once its version marker exists, a
+    missing or malformed key is treated as a recovery problem, not silently
+    replaced, because doing so would make stored user keys undecryptable.
+    """
     root = Path(root)
     env_path = root / ".env"
     example_path = root / ".env.example"
@@ -59,7 +72,8 @@ def prepare_env(root: Path = ROOT) -> Optional[str]:
         text = example_path.read_text(encoding="utf-8")
 
     lines = text.splitlines()
-    found = {"MIZAN_JUDGE_TOKEN": [], "COMPOSE_PROJECT_NAME": []}
+    found = {"MIZAN_JUDGE_TOKEN": [], "MIZAN_ENCRYPTION_KEY": [],
+             "MIZAN_ENCRYPTION_KEY_VERSION": [], "COMPOSE_PROJECT_NAME": []}
     for index, line in enumerate(lines):
         item = _key_value(line)
         if item and item[0] in found:
@@ -78,6 +92,29 @@ def prepare_env(root: Path = ROOT) -> Optional[str]:
             lines[token_entry[0][0]] = entry
         else:
             lines.append(entry)
+
+    key_entry = found["MIZAN_ENCRYPTION_KEY"]
+    version_entry = found["MIZAN_ENCRYPTION_KEY_VERSION"]
+    current_key = key_entry[0][1] if key_entry else ""
+    key_was_initialized = bool(version_entry and version_entry[0][1] == "1")
+    if not _valid_encryption_key(current_key):
+        if key_was_initialized:
+            raise ValueError(
+                "MIZAN_ENCRYPTION_KEY is missing or invalid, but the key was previously initialized. "
+                "Restore the original key from a private backup; generating a replacement would make saved user keys unreadable."
+            )
+        generated_key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii")
+        entry = "MIZAN_ENCRYPTION_KEY=" + generated_key
+        if key_entry:
+            lines[key_entry[0][0]] = entry
+        else:
+            lines.append(entry)
+    if not version_entry:
+        lines.append("MIZAN_ENCRYPTION_KEY_VERSION=1")
+    elif version_entry[0][1] == "":
+        lines[version_entry[0][0]] = "MIZAN_ENCRYPTION_KEY_VERSION=1"
+    elif version_entry[0][1] != "1":
+        raise ValueError("Unsupported MIZAN_ENCRYPTION_KEY_VERSION; restore a supported private configuration.")
 
     project_entry = found["COMPOSE_PROJECT_NAME"]
     if project_entry:
@@ -102,10 +139,11 @@ def main() -> None:
         raise SystemExit(2)
 
     if token:
-        print("Created a private Mizan judge token. Copy it now; it will not be printed again:")
+        print("Created a private Mizan installation-owner token. Copy it now; it will not be printed again:")
         print(token)
     else:
-        print("A valid-length judge token already exists in .env; it was preserved and not displayed.")
+        print("A valid-length installation-owner token already exists in .env; it was preserved and not displayed.")
+    print("A 256-bit key for encrypting researchers' Meta API keys is stored privately in .env and is never printed.")
     print("Next: docker compose up --build")
 
 

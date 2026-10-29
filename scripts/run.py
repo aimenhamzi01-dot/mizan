@@ -19,10 +19,11 @@ def main() -> int:
         return 2
 
     if token:
-        print("Created a private Mizan judge token. Copy it now; it will not be printed again:")
+        print("Created a private Mizan installation-owner token. Copy it now; it will not be printed again:")
         print(token)
     else:
         print("Using this installation's existing private configuration; token not displayed.")
+    print("The local AES-GCM encryption key is stored in .env and is never printed.")
 
     command = ["docker", "compose", "up", "--build"] + sys.argv[1:]
     try:

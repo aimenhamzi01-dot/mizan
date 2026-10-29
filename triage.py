@@ -63,7 +63,7 @@ def normalize(data):
     }
 
 
-def triage(report, code=None, lang="en"):
+def triage(report, code=None, lang="en", *, api_key=None):
     report = (report or "").strip()
     if not report:
         raise ValueError("Paste the report text first.")
@@ -94,7 +94,7 @@ def triage(report, code=None, lang="en"):
 
     last_err = None
     for _ in range(2):
-        reply = meta_client.chat(messages, max_tokens=2500, temperature=0.1)
+        reply = meta_client.chat(messages, api_key=api_key, max_tokens=2500, temperature=0.1)
         try:
             return normalize(extract_json(reply))
         except (ValueError, json.JSONDecodeError) as e:

@@ -14,12 +14,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
       - name: Run offline test suite
         run: python -m unittest discover -s tests -v
       - name: Validate Compose, build, and smoke-test the container
         env:
-          # Test-only credential. Never use a real judge token or provider key in CI.
+          # Test-only credentials. Never use a real owner token, encryption key, or provider key in CI.
           MIZAN_JUDGE_TOKEN: mizan-ci-test-token-0123456789abcdef
+          MIZAN_ENCRYPTION_KEY: eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=
         run: |
           set -euo pipefail
           cleanup() {

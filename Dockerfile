@@ -7,6 +7,8 @@ ENV PYTHONUNBUFFERED=1 \
     MIZAN_DB_PATH=/app/data/mizan.sqlite3
 
 WORKDIR /app
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 RUN groupadd --gid 10001 mizan \
     && useradd --uid 10001 --gid mizan --no-create-home --shell /usr/sbin/nologin mizan \
     && mkdir -p /app/data \

@@ -2,76 +2,94 @@
 
 ## Purpose
 
-Mizan is a self-hosted, single-researcher workbench for triaging vulnerability reports. Each researcher runs an independent local instance, configures their own Meta API key, and owns their SQLite data. The project does not provide a central public service or shared provider account.
+Mizan is a self-hosted, human-led security-report triage workbench. A single operator-controlled installation can serve multiple private research workspaces. Each user has an individual token and role; every ordinary case query is scoped to the user's workspace. Researchers provide their own Meta API keys and are responsible for their own provider usage.
 
 ## Components
 
-- **Browser UI (`static/index.html`)** — token-entry gate, intake form, local case queue, case detail, explicit model-egress confirmation, review form, and deletion control. The per-install token exists in browser memory only and is sent in an Authorization header. Untrusted fields are inserted through DOM text nodes, not interpreted as HTML. It loads no remote fonts or scripts.
-- **HTTP server (`server.py`)** — standard-library server. It defaults to loopback, requires the per-install Bearer token on every `/api/*` route, checks local `Host`/`Origin`, validates JSON bodies and request-size limits, and returns sanitized errors. The `/healthz` route exposes only a minimal readiness boolean. Docker Compose binds the container port to host loopback.
-- **Triage layer (`triage.py`, `prompts.py`)** — makes a single model request after explicit analysis action, keeps system and user roles separate, JSON-quotes report/code text with one-pass template substitution, extracts structured output, and normalizes enum values and decision constraints.
-- **Model client (`meta_client.py`)** — sends model messages to the configured Meta-compatible Chat Completions endpoint using the researcher-owned key from local environment configuration. It is the only outbound network path in live mode. A custom `META_API_BASE` is trusted operator configuration; never point it at a target or an untrusted endpoint.
-- **Local store (`review_store.py`)** — stores cases and application-level events in SQLite. SQL values use parameters. The default Python directory/database have restrictive owner permissions on POSIX systems; the database is plaintext and not encrypted.
-- **Container (`Dockerfile`, `compose.yaml`)** — runs as a non-root user with a read-only root filesystem, dropped capabilities, a private persistent volume, and a host port bound to `127.0.0.1` only.
-- **Bootstrap (`scripts/bootstrap.py`)** — creates a private `.env` file and generates a random access token for a fresh local installation. It never modifies `.env.example` or adds secrets to Git.
+- **Browser UI (`static/index.html`)** — personal-token gate, workspace case queue, profile for the researcher's provider key, explicit model-egress confirmation, human review, and workspace-member administration. The bearer token is held in memory only. Values are rendered as DOM text, not interpreted as HTML.
+- **HTTP server (`server.py`)** — validates local or explicitly allow-listed Host/Origin; authenticates the installation-owner token or an individual token; enforces role checks and workspace scope on every route; validates request sizes and JSON; and returns sanitized errors. It does not trust `X-Forwarded-*` headers.
+- **Identity store (`auth_store.py`)** — creates workspaces, users, high-entropy tokens, role assignments, revocation, and token rotation. SQLite stores only SHA-256 token digests; bearer tokens are returned once.
+- **Case store (`review_store.py`)** — versioned SQLite schema. Each report maps to one workspace. Existing records migrate into `default`. Event history records authenticated actor ids and names. Queries for non-owner principals include workspace scope.
+- **Secret store (`secret_store.py`)** — encrypts each user's Meta API key with AES-256-GCM and user-id associated data. The master 32-byte key is supplied through private `MIZAN_ENCRYPTION_KEY`, never through the browser.
+- **Triage (`triage.py`, `prompts.py`)** — issues a model call only after explicit user action and server confirmation. User report/code remain separate from system instructions, are JSON-quoted, and are normalized through hard acceptance guardrails.
+- **Model client (`meta_client.py`)** — sends messages to the configured Meta-compatible endpoint using the authenticated user's key. Only the installation owner may use the legacy environment-key fallback.
+- **Container (`Dockerfile`, `compose.yaml`)** — runs non-root with a read-only root filesystem, dropped capabilities, persistent SQLite volume, and a loopback-only host port by default.
+- **Bootstrap (`scripts/bootstrap.py`)** — creates a private owner token, AES encryption key, and unique Compose project name. It never prints the encryption key and refuses to silently replace a previously initialized missing key.
+
+## Authentication and workspace boundaries
+
+The installation-owner token is an operator secret granting global access. Other users are created by the owner or a scoped workspace admin and receive individual high-entropy tokens. Tokens are stored as SHA-256 hashes because they contain 256 bits of random entropy. A user may be revoked or have their token rotated; the old token then fails immediately. Tokens have no automatic expiry and there is no password/MFA/SSO login.
+
+The server derives identity and workspace from the bearer token; request-body workspace, username, or reviewer labels do not override it. Analysts can create/analyze cases. Reviewers can record human dispositions. Viewers can read. Workspace admins manage workspace members but cannot create another admin or workspace. The owner can administer all workspaces.
+
+All users within one workspace share visibility of its cases. The app does not implement per-case ownership. Out-of-scope case ids return 404 to avoid revealing whether another workspace contains them.
 
 ## Data flow
 
 ```mermaid
 sequenceDiagram
     actor Researcher
-    participant UI as Local browser UI
-    participant API as Local Mizan server
-    participant DB as Researcher's SQLite database
-    participant Model as Researcher's configured Meta API
+    participant UI as Browser UI
+    participant API as Mizan server
+    participant Auth as Token and role store
+    participant DB as Local SQLite
+    participant Keys as AES-GCM key store
+    participant Model as Configured Meta endpoint
 
-    Researcher->>UI: Enter this installation's private token
-    UI->>API: Protected request with Authorization: Bearer token
-    API-->>UI: Permit access after token validation
-    Researcher->>UI: Save report and optional code
+    Researcher->>UI: Enter personal bearer token
+    UI->>API: Protected request with Authorization header
+    API->>Auth: Validate token digest, role, workspace
+    Auth-->>API: Authenticated principal
+    Researcher->>UI: Save report and optional source
     UI->>API: POST /api/reports
-    API->>DB: Store raw text, status=received, report_received event
-    DB-->>UI: Case record
-    Note over UI,Model: No model call occurs during save
-    Researcher->>UI: Explicitly confirm Analyze with Meta
-    UI->>API: POST /api/reports/{id}/analyze
-    API->>DB: Read case text
-    API->>Model: Send report/code as untrusted user data
-    Model-->>API: Structured recommendation
-    API->>DB: Store recommendation, status=analyzed, event
-    API-->>UI: Recommendation (not a disposition)
-    Researcher->>UI: Select final decision and save
+    API->>DB: Store text in principal's workspace
+    Note over API,Model: No model call occurs during save
+    Researcher->>UI: Save personal Meta API key
+    UI->>API: PUT /api/me/model-key
+    API->>Keys: Encrypt with AES-GCM, user id as associated data
+    Researcher->>UI: Explicitly confirm analysis
+    UI->>API: POST /api/reports/{id}/analyze, confirm_egress=true
+    API->>DB: Read case within principal's workspace
+    API->>Keys: Decrypt only this user's key
+    API->>Model: Send selected report/code
+    Model-->>API: Structured advisory recommendation
+    API->>DB: Save analysis event with actor identity
+    Researcher->>UI: Reviewer records disposition
     UI->>API: POST /api/reports/{id}/review
-    API->>DB: Store human disposition and append event
-    API-->>UI: Reviewed case
+    API->>DB: Store human decision and authenticated actor
 ```
 
-The sequence intentionally contains no target-system component. The only outbound application path is the configured model endpoint, invoked only after explicit user confirmation and `confirm_egress: true`. Each researcher configures and pays for their own provider key.
+No target-system component exists. The only application egress is the configured model endpoint, and it occurs only after explicit confirmation.
 
 ## Case state machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> received: save locally
-    received --> analyzed: explicit model analysis
-    analyzed --> analyzed: rerun analysis before review
-    analyzed --> reviewed: explicit human disposition
+    [*] --> received: analyst saves locally
+    received --> analyzed: analyst confirms model egress
+    analyzed --> analyzed: rerun before human review
+    analyzed --> reviewed: reviewer records disposition
     reviewed --> reviewed: human decision may be revised (new event)
-    reviewed --> [*]: delete case and application events
+    reviewed --> [*]: admin deletes case and application events
 ```
 
-The model's `suggested_decision` and a reviewer's `review_decision` are different database fields. Analysis never sets `review_decision`. A reviewed case cannot be re-analyzed; create a separate case if a fresh analysis is required.
+`analysis.suggested_decision` and `review_decision` are separate. Model analysis never becomes a final disposition. A reviewed case cannot be re-analyzed; create a new case if a fresh analysis is required.
 
-## Trust boundaries
+## Storage and migrations
 
-1. **Browser input is untrusted.** Report/code are length-limited text. They are never parsed as executable files. Stored values are rendered as text, not HTML.
-2. **Model output is untrusted.** The normalizer restricts the response schema and enums. It does not make the model authoritative or verify unprovided route/middleware context.
-3. **Local persistence is sensitive plaintext.** A case may contain private vulnerability details. SQLite is not encrypted; local backups and copies remain the researcher's responsibility.
-4. **The API is single-install, not multi-tenant.** A per-install shared token grants full access to that install's cases. It is not a public account system or a safe mechanism for sharing one server among untrusted researchers.
-5. **Docker exposure is restricted by default.** Compose publishes to `127.0.0.1`, although the process listens on `0.0.0.0` inside the container. Widening the host mapping or adding a public proxy requires a new security design.
-6. **Operator configuration is trusted.** `MIZAN_JUDGE_TOKEN`, `MODEL_API_KEY`, and `META_API_BASE` are local process/environment settings, never report fields. The base URL receives the model bearer key and case contents in live analysis.
+Schema version 2 adds workspaces, users, token digests, report-to-workspace mappings, encrypted personal API keys, and actor ids in the event table. Existing reports are assigned to `default` during migration. Case text and event details remain plaintext; only provider API keys are encrypted. The installation key must be backed up with the database. Losing it prevents decryption of saved provider keys.
+
+## Trust boundaries and limitations
+
+1. **Browser input is untrusted.** Reports and code are length-limited text; they are never imported or executed.
+2. **The token determines identity.** Request-supplied workspace ids are ignored for ordinary users; audit actor identities come from authentication, not client text.
+3. **The workspace is the sharing boundary.** All members in a workspace can read all cases there. The installation owner can read all workspaces. The host operator can access SQLite and `.env`.
+4. **Report storage is plaintext.** Backups, host access, and volume permissions require operator controls.
+5. **Provider keys are encrypted at rest, not in use.** The process decrypts a user's key to call the provider. An attacker with process access or both the DB and master key can recover keys.
+6. **The model endpoint is an external recipient.** `META_API_BASE` receives the bearer key and selected report/code during explicit analysis.
+7. **Network protections are limited.** Default bind is loopback. Private remote access requires a TLS proxy, exact allow-lists, and network controls. Mizan itself has no TLS termination, rate limiting, token expiry, SSO, or MFA.
+8. **AI output remains advisory.** The model cannot infer omitted route decorators, middleware, or deployment context. Humans remain responsible for dispositions.
 
 ## Non-goals
 
-- Exploit execution, dynamic scanning, proof-of-concept replay, or target connectivity.
-- Automatic acceptance/rejection, ticket closure, disclosure, or reporter communication.
-- Central multi-user hosting, shared provider billing, encrypted storage, or regulated-data compliance.
+Mizan does not execute exploits, validate external targets, automatically close tickets, contact programs/reporters, provide centralized SaaS hosting, or make compliance/security certification claims.

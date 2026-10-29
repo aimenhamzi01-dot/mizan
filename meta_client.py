@@ -1,6 +1,6 @@
-"""Tiny client for the Meta Model API (OpenAI-compatible chat completions).
+"""Tiny standard-library client for the Meta Model API (OpenAI-compatible chat completions).
 
-Standard library only, so the project runs without `pip install`.
+The application separately depends on `cryptography` for local API-key storage.
 """
 import json
 import os
@@ -29,8 +29,9 @@ def get_config():
     return key, base, models
 
 
-def has_key():
-    return bool(get_config()[0])
+def has_key(api_key=None):
+    """Report whether an explicit user key or legacy installation key exists."""
+    return bool(api_key or get_config()[0])
 
 
 def _content_to_text(content):
@@ -41,9 +42,10 @@ def _content_to_text(content):
     return ""
 
 
-def chat(messages, *, max_tokens=3000, temperature=0.2, timeout=120):
+def chat(messages, *, api_key=None, max_tokens=3000, temperature=0.2, timeout=120):
     """Send a chat completion. Tries each model in META_MODEL until one is accepted."""
-    key, base, models = get_config()
+    configured_key, base, models = get_config()
+    key = api_key or configured_key
     if not key:
         raise MetaAPIError("MODEL_API_KEY is not set. Add it to your .env file.", 401)
 

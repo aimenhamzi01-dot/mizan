@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 import tempfile
@@ -12,13 +13,14 @@ class BootstrapTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         (self.root / ".env.example").write_text(
-            "MIZAN_JUDGE_TOKEN=\nMODEL_API_KEY=\n", encoding="utf-8"
+            "MIZAN_JUDGE_TOKEN=\nMIZAN_ENCRYPTION_KEY=\nMIZAN_ENCRYPTION_KEY_VERSION=\nMODEL_API_KEY=\n",
+            encoding="utf-8",
         )
 
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_first_run_generates_private_token_and_unique_compose_project(self):
+    def test_first_run_generates_private_tokens_key_and_unique_compose_project(self):
         token = prepare_env(self.root)
         env_path = self.root / ".env"
         content = env_path.read_text(encoding="utf-8")
@@ -26,6 +28,9 @@ class BootstrapTests(unittest.TestCase):
         self.assertGreaterEqual(len(token.encode("utf-8")), 32)
         self.assertIn("MIZAN_JUDGE_TOKEN=" + token, content)
         self.assertIn("MODEL_API_KEY=", content)
+        encryption_key = re.search(r"(?m)^MIZAN_ENCRYPTION_KEY=(.+)$", content).group(1)
+        self.assertEqual(len(base64.urlsafe_b64decode(encryption_key.encode("ascii"))), 32)
+        self.assertIn("MIZAN_ENCRYPTION_KEY_VERSION=1", content)
         match = re.search(r"(?m)^COMPOSE_PROJECT_NAME=(mizan-[0-9a-f]{16})$", content)
         self.assertIsNotNone(match)
         self.assertNotIn(token, (self.root / ".env.example").read_text(encoding="utf-8"))
@@ -35,11 +40,12 @@ class BootstrapTests(unittest.TestCase):
         self.assertIsNone(prepare_env(self.root))
         self.assertEqual(env_path.read_text(encoding="utf-8"), before)
 
-    def test_separate_installations_get_different_tokens_and_volumes(self):
+    def test_separate_installations_get_different_tokens_keys_and_volumes(self):
         second_root = self.root / "second-installation"
         second_root.mkdir()
         (second_root / ".env.example").write_text(
-            "MIZAN_JUDGE_TOKEN=\nMODEL_API_KEY=\n", encoding="utf-8"
+            "MIZAN_JUDGE_TOKEN=\nMIZAN_ENCRYPTION_KEY=\nMIZAN_ENCRYPTION_KEY_VERSION=\nMODEL_API_KEY=\n",
+            encoding="utf-8",
         )
         first_token = prepare_env(self.root)
         second_token = prepare_env(second_root)
@@ -47,20 +53,27 @@ class BootstrapTests(unittest.TestCase):
         second_config = (second_root / ".env").read_text(encoding="utf-8")
         first_project = re.search(r"(?m)^COMPOSE_PROJECT_NAME=(.+)$", first_config).group(1)
         second_project = re.search(r"(?m)^COMPOSE_PROJECT_NAME=(.+)$", second_config).group(1)
+        first_key = re.search(r"(?m)^MIZAN_ENCRYPTION_KEY=(.+)$", first_config).group(1)
+        second_key = re.search(r"(?m)^MIZAN_ENCRYPTION_KEY=(.+)$", second_config).group(1)
         self.assertNotEqual(first_token, second_token)
         self.assertNotEqual(first_project, second_project)
+        self.assertNotEqual(first_key, second_key)
 
-    def test_valid_existing_token_is_preserved_and_not_returned(self):
+    def test_valid_existing_token_and_encryption_key_are_preserved(self):
         expected = "x" * 43
+        expected_key = base64.urlsafe_b64encode(b"k" * 32).decode("ascii")
         env_path = self.root / ".env"
         env_path.write_text(
-            "MIZAN_JUDGE_TOKEN=" + expected + "\nMODEL_API_KEY=my-own-key\n",
+            "MIZAN_JUDGE_TOKEN=" + expected + "\n"
+            "MIZAN_ENCRYPTION_KEY=" + expected_key + "\n"
+            "MIZAN_ENCRYPTION_KEY_VERSION=1\nMODEL_API_KEY=my-own-key\n",
             encoding="utf-8",
         )
         token = prepare_env(self.root)
         content = env_path.read_text(encoding="utf-8")
         self.assertIsNone(token)
         self.assertIn("MIZAN_JUDGE_TOKEN=" + expected, content)
+        self.assertIn("MIZAN_ENCRYPTION_KEY=" + expected_key, content)
         self.assertIn("MODEL_API_KEY=my-own-key", content)
         self.assertIn("COMPOSE_PROJECT_NAME=mizan-", content)
 
@@ -75,6 +88,7 @@ class BootstrapTests(unittest.TestCase):
         self.assertNotEqual(token, "short")
         self.assertIn("MIZAN_JUDGE_TOKEN=" + token, content)
         self.assertIn("MODEL_API_KEY=private-value", content)
+        self.assertIn("MIZAN_ENCRYPTION_KEY_VERSION=1", content)
 
     def test_duplicate_secret_or_project_entries_are_rejected(self):
         env_path = self.root / ".env"
@@ -105,6 +119,24 @@ class BootstrapTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symlink"):
             prepare_env(self.root)
         self.assertEqual(target.read_text(encoding="utf-8"), "leave unchanged\n")
+
+    def test_initialized_encryption_key_is_preserved_and_missing_key_is_not_replaced(self):
+        env_path = self.root / ".env"
+        expected_key = base64.urlsafe_b64encode(b"k" * 32).decode("ascii")
+        env_path.write_text(
+            "MIZAN_JUDGE_TOKEN=" + "x" * 43 + "\n"
+            "MIZAN_ENCRYPTION_KEY=" + expected_key + "\n"
+            "MIZAN_ENCRYPTION_KEY_VERSION=1\n",
+            encoding="utf-8",
+        )
+        self.assertIsNone(prepare_env(self.root))
+        self.assertIn("MIZAN_ENCRYPTION_KEY=" + expected_key, env_path.read_text(encoding="utf-8"))
+        env_path.write_text(
+            "MIZAN_JUDGE_TOKEN=" + "x" * 43 + "\nMIZAN_ENCRYPTION_KEY_VERSION=1\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "Restore the original key"):
+            prepare_env(self.root)
 
 
 if __name__ == "__main__":

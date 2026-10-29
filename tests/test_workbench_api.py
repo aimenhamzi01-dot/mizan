@@ -13,6 +13,8 @@ from urllib.request import Request, urlopen
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import meta_client
+import auth_store
+import review_store
 import server
 
 
@@ -37,7 +39,10 @@ class WorkbenchAPITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.auth_token = "mizan-test-judge-token-0123456789abcdef"
-        cls.auth_env = patch.dict(os.environ, {"MIZAN_JUDGE_TOKEN": cls.auth_token})
+        cls.auth_env = patch.dict(os.environ, {
+            "MIZAN_JUDGE_TOKEN": cls.auth_token,
+            "MODEL_API_KEY": "mizan-test-owner-key-never-real",
+        })
         cls.auth_env.start()
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.server.server_address[1]
@@ -46,7 +51,10 @@ class WorkbenchAPITests(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.env = patch.dict(os.environ, {"MIZAN_DB_PATH": str(Path(self.temp_dir.name) / "api.sqlite3")})
+        self.env = patch.dict(os.environ, {
+            "MIZAN_DB_PATH": str(Path(self.temp_dir.name) / "api.sqlite3"),
+            "MIZAN_ENCRYPTION_KEY": "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=",
+        })
         self.env.start()
 
     @classmethod
@@ -60,13 +68,13 @@ class WorkbenchAPITests(unittest.TestCase):
         self.env.stop()
         self.temp_dir.cleanup()
 
-    def request(self, path, body=None, method="GET", content_type="application/json", extra_headers=None, auth=True):
+    def request(self, path, body=None, method="GET", content_type="application/json", extra_headers=None, auth=True, token=None):
         data = None if body is None else (body if isinstance(body, bytes) else json.dumps(body).encode("utf-8"))
         headers = {}
         if content_type:
             headers["Content-Type"] = content_type
         if auth:
-            headers["Authorization"] = "Bearer " + self.auth_token
+            headers["Authorization"] = "Bearer " + (token or self.auth_token)
         headers.update(extra_headers or {})
         req = Request("http://127.0.0.1:%d%s" % (self.port, path), data=data, headers=headers, method=method)
         try:
@@ -81,6 +89,18 @@ class WorkbenchAPITests(unittest.TestCase):
         )
         self.assertEqual(status, 201)
         return json.loads(body)["report"]
+
+    def create_workspace(self, name):
+        status, _, body = self.request("/api/admin/workspaces", {"name": name}, method="POST")
+        self.assertEqual(status, 201)
+        return json.loads(body)["workspace"]
+
+    def create_user(self, username, role, workspace_id="default"):
+        status, _, body = self.request(
+            "/api/admin/users", {"username": username, "role": role, "workspace_id": workspace_id}, method="POST"
+        )
+        self.assertEqual(status, 201)
+        return json.loads(body)
 
     def test_health_and_metrics_are_local_and_content_free(self):
         status, _, body = self.request("/api/health")
@@ -216,13 +236,45 @@ class WorkbenchAPITests(unittest.TestCase):
     def test_provider_error_body_is_not_returned_to_browser(self):
         case = self.create_case()
         secret_detail = "upstream echoed report body and fake-key-12345"
-        with patch.object(meta_client, "chat", side_effect=meta_client.MetaAPIError(secret_detail, 502)):
+        with patch.object(meta_client, "chat", side_effect=meta_client.MetaAPIError(secret_detail, 401)):
             status, _, body = self.request(
                 "/api/reports/%s/analyze" % case["id"], {"confirm_egress": True}, method="POST"
             )
         self.assertEqual(status, 502)
         self.assertNotIn(b"fake-key-12345", body)
         self.assertNotIn(b"upstream echoed", body)
+
+    def test_malformed_admin_user_payloads_have_client_error_statuses(self):
+        status, _, body = self.request(
+            "/api/admin/users",
+            {"username": "bad.role", "role": ["admin"], "workspace_id": "default"},
+            method="POST",
+        )
+        self.assertEqual(status, 400)
+        self.assertNotIn(b"Traceback", body)
+        status, _, _ = self.request(
+            "/api/admin/users",
+            {"username": "missing.workspace", "role": "viewer", "workspace_id": "missing"},
+            method="POST",
+        )
+        self.assertEqual(status, 404)
+        self.create_user("duplicate.name", "viewer")
+        status, _, _ = self.request(
+            "/api/admin/users",
+            {"username": "duplicate.name", "role": "viewer", "workspace_id": "default"},
+            method="POST",
+        )
+        self.assertEqual(status, 409)
+
+    def test_user_revocation_storage_error_is_returned_as_sanitized_json(self):
+        user = self.create_user("revoke.error", "viewer")
+        with patch.object(auth_store, "revoke_user", side_effect=RuntimeError("private database detail")):
+            status, _, body = self.request(
+                "/api/admin/users/%s" % user["user"]["id"], method="DELETE"
+            )
+        self.assertEqual(status, 500)
+        self.assertIn(b"Internal server error", body)
+        self.assertNotIn(b"private database detail", body)
 
     def test_non_object_json_and_wrong_content_type_are_rejected_cleanly(self):
         status, _, body = self.request("/api/reports", b"[]", method="POST")
@@ -268,6 +320,162 @@ class WorkbenchAPITests(unittest.TestCase):
         self.assertEqual(status, 404)
         status, _, _ = self.request("/api/reports/%s/history" % case["id"])
         self.assertEqual(status, 404)
+
+    def test_workspace_boundaries_hide_lists_metrics_details_and_history(self):
+        first = self.create_workspace("Team Alpha")
+        second = self.create_workspace("Team Beta")
+        alpha = self.create_user("alpha.analyst", "analyst", first["id"])
+        beta = self.create_user("beta.viewer", "viewer", second["id"])
+        status, _, body = self.request(
+            "/api/reports", {"report": "Alpha private report", "code": "private code", "lang": "en"},
+            method="POST", token=alpha["token"],
+        )
+        self.assertEqual(status, 201)
+        case_id = json.loads(body)["report"]["id"]
+        status, _, body = self.request("/api/reports", token=beta["token"])
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["reports"], [])
+        status, _, body = self.request("/api/metrics", token=beta["token"])
+        self.assertEqual(json.loads(body)["total_reports"], 0)
+        status, _, _ = self.request("/api/reports/%s" % case_id, token=beta["token"])
+        self.assertEqual(status, 404)
+        status, _, _ = self.request("/api/reports/%s/history" % case_id, token=beta["token"])
+        self.assertEqual(status, 404)
+        status, _, body = self.request("/api/reports", token=alpha["token"])
+        self.assertEqual(len(json.loads(body)["reports"]), 1)
+        status, _, body = self.request("/api/reports", token=self.auth_token)
+        self.assertGreaterEqual(len(json.loads(body)["reports"]), 1)
+
+    def test_role_matrix_and_workspace_admin_scope_are_enforced_server_side(self):
+        first = self.create_workspace("Team Alpha")
+        second = self.create_workspace("Team Beta")
+        admin = self.create_user("alpha.admin", "admin", first["id"])
+        analyst = self.create_user("alpha.analyst", "analyst", first["id"])
+        reviewer = self.create_user("alpha.reviewer", "reviewer", first["id"])
+        viewer = self.create_user("alpha.viewer", "viewer", first["id"])
+        status, _, _ = self.request(
+            "/api/admin/users", {"username": "escape.user", "role": "viewer", "workspace_id": second["id"]},
+            method="POST", token=admin["token"],
+        )
+        self.assertEqual(status, 404)
+        status, _, _ = self.request(
+            "/api/admin/users", {"username": "overprivileged", "role": "admin", "workspace_id": first["id"]},
+            method="POST", token=admin["token"],
+        )
+        self.assertEqual(status, 403)
+        status, _, _ = self.request(
+            "/api/reports", {"report": "not permitted", "code": "", "lang": "en"},
+            method="POST", token=reviewer["token"],
+        )
+        self.assertEqual(status, 403)
+        status, _, _ = self.request(
+            "/api/reports", {"report": "not permitted", "code": "", "lang": "en"},
+            method="POST", token=viewer["token"],
+        )
+        self.assertEqual(status, 403)
+        case = self.create_case("Role test case")
+        status, _, _ = self.request(
+            "/api/reports/%s/review" % case["id"], {"decision": "accept", "note": ""},
+            method="POST", token=analyst["token"],
+        )
+        self.assertEqual(status, 403)
+        status, _, _ = self.request("/api/reports/%s" % case["id"], method="DELETE", token=reviewer["token"])
+        self.assertEqual(status, 403)
+
+    def test_revoked_personal_token_is_rejected_immediately(self):
+        user = self.create_user("revoke.me", "viewer")
+        status, _, _ = self.request("/api/me", token=user["token"])
+        self.assertEqual(status, 200)
+        status, _, _ = self.request("/api/admin/users/%s" % user["user"]["id"], method="DELETE")
+        self.assertEqual(status, 200)
+        status, _, _ = self.request("/api/me", token=user["token"])
+        self.assertEqual(status, 401)
+
+    def test_admin_can_rotate_a_user_token_once_and_old_token_stops_working(self):
+        user = self.create_user("rotate.me", "viewer")
+        status, _, body = self.request(
+            "/api/admin/users/%s/rotate-token" % user["user"]["id"], {}, method="POST"
+        )
+        self.assertEqual(status, 200)
+        rotated = json.loads(body)["token"]
+        self.assertNotEqual(rotated, user["token"])
+        self.assertIn(rotated.encode(), body)
+        status, _, _ = self.request("/api/me", token=user["token"])
+        self.assertEqual(status, 401)
+        status, _, profile = self.request("/api/me", token=rotated)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(profile)["username"], "rotate.me")
+
+    def test_authenticated_reviewer_identity_cannot_be_spoofed_in_request_body(self):
+        analyst = self.create_user("case.analyst", "analyst")
+        reviewer = self.create_user("verified.reviewer", "reviewer")
+        status, _, body = self.request(
+            "/api/reports", {"report": "Identity audit test", "code": "", "lang": "en"},
+            method="POST", token=analyst["token"],
+        )
+        case_id = json.loads(body)["report"]["id"]
+        status, _, _ = self.request(
+            "/api/me/model-key", {"api_key": "identity-test-key-not-real"}, method="PUT", token=analyst["token"]
+        )
+        self.assertEqual(status, 200)
+        with patch.object(meta_client, "chat", return_value=json.dumps(GOOD)):
+            status, _, _ = self.request(
+                "/api/reports/%s/analyze" % case_id, {"confirm_egress": True}, method="POST",
+                token=analyst["token"],
+            )
+        self.assertEqual(status, 200)
+        status, _, body = self.request(
+            "/api/reports/%s/review" % case_id,
+            {"decision": "accept", "reviewer": "Forged Administrator", "note": "Reviewed."},
+            method="POST", token=reviewer["token"],
+        )
+        self.assertEqual(status, 200)
+        result = json.loads(body)["report"]
+        self.assertEqual(result["reviewer"], "verified.reviewer")
+        status, _, body = self.request("/api/reports/%s/history" % case_id, token=reviewer["token"])
+        event = json.loads(body)["events"][-1]
+        self.assertEqual(event["actor"], "verified.reviewer")
+        self.assertEqual(event["actor_user_id"], reviewer["user"]["id"])
+
+    def test_each_researcher_uses_own_encrypted_model_key_and_missing_key_blocks_egress(self):
+        analyst = self.create_user("key.owner", "analyst")
+        no_key = self.create_user("no.key", "analyst")
+        personal_key = "meta-personal-key-not-real-123"
+        status, _, body = self.request(
+            "/api/me/model-key", {"api_key": personal_key}, method="PUT", token=analyst["token"]
+        )
+        self.assertEqual(status, 200)
+        self.assertNotIn(personal_key.encode(), body)
+        status, _, profile = self.request("/api/me", token=analyst["token"])
+        self.assertTrue(json.loads(profile)["has_model_key"])
+        status, _, profile = self.request("/api/me", token=no_key["token"])
+        self.assertFalse(json.loads(profile)["has_model_key"])
+        status, _, body = self.request(
+            "/api/reports", {"report": "Per-user key test", "code": "", "lang": "en"},
+            method="POST", token=analyst["token"],
+        )
+        case_id = json.loads(body)["report"]["id"]
+        captured = {}
+
+        def fake_chat(messages, **kwargs):
+            captured["api_key"] = kwargs.get("api_key")
+            return json.dumps(GOOD)
+
+        with patch.object(meta_client, "chat", side_effect=fake_chat):
+            status, _, _ = self.request(
+                "/api/reports/%s/analyze" % case_id, {"confirm_egress": True}, method="POST",
+                token=analyst["token"],
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(captured["api_key"], personal_key)
+        status, _, body = self.request(
+            "/api/triage", {"report": "no key", "confirm_egress": True}, method="POST", token=no_key["token"]
+        )
+        self.assertEqual(status, 409)
+        self.assertIn(b"Meta API key", body)
+        with review_store._connect() as conn:
+            stored = conn.execute("SELECT ciphertext FROM user_api_keys WHERE user_id=?", (analyst["user"]["id"],)).fetchone()[0]
+        self.assertNotIn(personal_key.encode(), bytes(stored))
 
 
 if __name__ == "__main__":

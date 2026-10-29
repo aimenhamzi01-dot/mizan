@@ -1,15 +1,74 @@
-# Local API Guide
+# Mizan API Guide
 
-Run Mizan with `python3 server.py` or `docker compose up --build`. The local UI and API are available at `http://127.0.0.1:8000`. Docker Compose publishes on loopback only. Every `/api/*` route requires `Authorization: Bearer <MIZAN_JUDGE_TOKEN>`. The token is generated per installation and grants full access to that installation's cases; it is not an individual user account. Each researcher should run a separate instance and configure their own provider key. Do not expose this local API publicly. JSON request bodies must use `Content-Type: application/json`.
+Run Mizan with `python3 server.py` or `docker compose up --build`. The default UI is `http://127.0.0.1:8000`; Compose publishes on loopback. For private team access behind a TLS reverse proxy, configure `MIZAN_ALLOWED_HOSTS` and `MIZAN_ALLOWED_ORIGINS` and keep the app port private.
 
-Create the local token with `python3 scripts/bootstrap.py`. It is printed once when generated and stored in the private `.env` file. Read the token without echoing it, then reuse the header array below (Bash):
+Every `/api/*` route requires an `Authorization: Bearer <token>` header. The installation-owner token grants global administration. Individual user tokens are workspace-scoped and role-limited. Tokens are shown once at creation/rotation. Request bodies must use `Content-Type: application/json` and be JSON objects.
+
+For a local terminal, read a token without echoing it:
 
 ```bash
-read -rsp 'Local Mizan token: ' TOKEN; printf '\n'
+read -rsp 'Mizan access token: ' TOKEN; printf '\n'
 AUTH=(-H "Authorization: Bearer $TOKEN")
 ```
 
-Do not put the token in a URL, issue, screenshot, or source file. Clear the shell variable when finished with `unset TOKEN AUTH`.
+Never put tokens or API keys in URLs, issues, source control, or shared logs. Clear shell variables when finished with `unset TOKEN AUTH`.
+
+## Roles
+
+| Role | Allowed actions |
+|---|---|
+| Installation owner token | Global read/write; create workspaces; create any role; revoke/rotate users |
+| Workspace `admin` | Workspace read; manage members; create analyst/reviewer/viewer; revoke/rotate workspace members |
+| `analyst` | Read workspace data; submit cases; request analysis |
+| `reviewer` | Read workspace data; record human dispositions |
+| `viewer` | Read only |
+
+All users in a workspace share visibility of its cases. Workspace admins cannot create other admins or access another workspace. Unknown/out-of-scope case IDs return 404.
+
+## Identity and workspace administration
+
+The installation owner can create a workspace:
+
+```bash
+curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/admin/workspaces \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Product Security"}'
+```
+
+Create an individual researcher token (returned once):
+
+```bash
+curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/admin/users \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"researcher.alex","role":"analyst","workspace_id":"WORKSPACE_ID"}'
+```
+
+`role` is `admin`, `analyst`, `reviewer`, or `viewer`. A workspace admin may provision only the admin's own workspace and cannot assign the `admin` role. The API stores only a digest of each token; preserve the response privately for the user.
+
+Other identity routes:
+
+| Method and route | Behavior |
+|---|---|
+| `GET /api/me` | Current user id, username, role, workspace, and boolean `has_model_key` |
+| `GET /api/workspaces` | All workspaces for owner; the current workspace for a user |
+| `GET /api/admin/users` | Active/revoked users in the permitted administrative scope |
+| `POST /api/admin/users/{id}/rotate-token` | Replace token; old token is invalidated immediately; new token returned once |
+| `DELETE /api/admin/users/{id}` | Revoke user and remove that user's encrypted provider key |
+
+An administrator cannot rotate or revoke the currently authenticated account through the UI. Revoke and recreate an account if a role change is required.
+
+## Personal Meta API keys
+
+Each researcher supplies their own authorized API key; Mizan does not provide provider billing. The key is encrypted in the local database with AES-GCM. It is never returned from the API. Example:
+
+```bash
+curl "${AUTH[@]}" -X PUT http://127.0.0.1:8000/api/me/model-key \
+  -H 'Content-Type: application/json' \
+  -d '{"api_key":"YOUR_PERSONAL_KEY"}'
+curl "${AUTH[@]}" -X DELETE http://127.0.0.1:8000/api/me/model-key
+```
+
+Do not place a real key in shell history. Prefer the profile panel in the UI. The installation-owner token may use the legacy `MODEL_API_KEY` environment fallback; ordinary user tokens never inherit it. `MIZAN_ENCRYPTION_KEY` must remain private and backed up with the database.
 
 ## Health and queue
 
@@ -20,11 +79,11 @@ curl "${AUTH[@]}" 'http://127.0.0.1:8000/api/reports?status=received&limit=25'
 curl "${AUTH[@]}" http://127.0.0.1:8000/api/metrics
 ```
 
-`GET /healthz` is unauthenticated for container health checks and returns only `{"ok":true}`. It reveals no case data or provider-key status. The authenticated API health response includes `ok`, a boolean `has_key`, and the storage type; it never returns either secret. List results are bounded summaries and metrics contain counts only.
+`GET /healthz` is unauthenticated for container health checks and returns only `{"ok":true}`. `/api/health` returns `ok`, boolean `has_key`, and storage type. It never returns credentials. List responses are bounded summaries; metrics contain workspace-scoped counts only.
 
-## Save a report locally
+## Save a case locally
 
-Saving is local and makes no model request:
+An analyst submits a case to their own workspace; it is stored as text and no model call is made:
 
 ```bash
 curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports \
@@ -32,32 +91,34 @@ curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports \
   -d '{"report":"Synthetic report text","code":"def example(): pass","lang":"en"}'
 ```
 
-The returned `report.id` is a UUID. The new case has `status: "received"`, `analysis: null`, and `review_decision: null`.
+The installation owner may include `workspace_id` to assign a case; an ordinary analyst cannot select another workspace. The returned case has `status: "received"`, `analysis: null`, and `review_decision: null`.
 
 ## Request an AI recommendation
 
-This route sends report/code to the locally configured Meta Model API using the installer's own provider key. The UI requires explicit confirmation, and the API also requires `confirm_egress: true`:
+The authenticated analyst uses their own saved Meta key. The API requires explicit consent as well as the UI confirmation:
 
 ```bash
 curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports/CASE_ID/analyze \
   -H 'Content-Type: application/json' -d '{"confirm_egress":true}'
 ```
 
-The result stores an `analysis` and `suggested_decision`; it does not set a final human disposition. If the provider key is absent or the model call fails, the report remains stored and the browser receives a sanitized error. The researcher is responsible for their provider charges and for ensuring the report may be sent to that endpoint.
+The selected report and source snippet are sent to the configured `META_API_BASE`. The analysis stores a model recommendation and never sets a human disposition. Saving a report alone is always local-only.
+
+`POST /api/triage` remains available for stateless compatibility. Synthetic canned results can be requested with `{ "demo":"injection", "lang":"en" }`. A live call requires analyst/admin role, the user's own key (or owner-only fallback), and `confirm_egress: true`.
 
 ## Record a human disposition
 
-A case must have an analysis before recording a review. The decision is an explicit human choice and remains separate from the suggestion:
+A case must have model analysis before a disposition is recorded. Only a reviewer, workspace admin, or installation owner may do so:
 
 ```bash
 curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports/CASE_ID/review \
   -H 'Content-Type: application/json' \
-  -d '{"decision":"need-info","reviewer":"Reviewer A","note":"Check route-level authorization before confirming."}'
+  -d '{"decision":"need-info","note":"Check route-level authorization before confirming."}'
 ```
 
-Valid decisions are `accept`, `need-info`, `duplicate`, and `reject`. Reviews are recorded in local event history. No ticket or message is sent.
+The server records the authenticated username and user id; a client-supplied `reviewer` value is not trusted. Decisions are `accept`, `need-info`, `duplicate`, and `reject`. No ticket or message is sent.
 
-## Read and delete a case
+## Read and delete cases
 
 ```bash
 curl "${AUTH[@]}" http://127.0.0.1:8000/api/reports/CASE_ID
@@ -65,20 +126,15 @@ curl "${AUTH[@]}" http://127.0.0.1:8000/api/reports/CASE_ID/history
 curl "${AUTH[@]}" -X DELETE http://127.0.0.1:8000/api/reports/CASE_ID
 ```
 
-Deletion removes the case and its application-level event history from the configured database. It does not delete backups, copies, or files outside that database.
+Case deletion requires admin role in the relevant workspace (or the installation owner). It removes the case and application-level events, not backups or external copies.
 
-## Stateless compatibility and canned examples
+## Routes and errors
 
-`POST /api/triage` remains available for compatibility. Send `{ "demo": "injection", "lang": "en" }` for a bundled canned result without a model call, or send `{ "report": "...", "code": "...", "lang": "en", "confirm_egress": true }` for stateless live analysis. Both calls still require the Bearer header. The persisted workflow is preferred because it separates intake, model analysis, and human review.
-
-`GET /api/sample?kind=injection&lang=en` returns a synthetic sample input; `kind` may be `injection`, `valid`, or `noise`, and `lang` may be `en` or `ar`. This route also requires the Bearer header.
-
-## Limits and errors
-
-- If `MIZAN_JUDGE_TOKEN` is unset or shorter than 32 bytes, API routes fail closed with HTTP 503.
-- Missing, malformed, or incorrect Bearer credentials return HTTP 401 with `WWW-Authenticate: Bearer`.
-- HTTP request bodies are capped at 2 MiB.
-- Report text, source context, reviewer labels, and notes have explicit character limits.
-- JSON top-level values must be objects; unsupported content types and invalid workflow transitions return 4xx responses.
-- Missing cases return 404; cases in an invalid state return 409.
-- Provider error bodies are not exposed to the browser.
+- `GET /api/sample?kind=injection|valid|noise&lang=en|ar` — synthetic sample input (any authenticated role).
+- `GET /api/reports` — bounded workspace-scoped summaries with `status`, `q`, `limit`, and `offset` filters.
+- `GET /api/reports/{id}` and `/history` — workspace-scoped detail and events.
+- `GET /api/metrics` — counts scoped to the active workspace.
+- Missing/invalid credentials return 401; insufficient role returns 403; unknown/out-of-scope cases return 404.
+- If no owner token or provisioned users are available, API access fails closed with HTTP 503.
+- Request bodies are capped at 2 MiB; unsupported content types, oversized input, invalid decisions, and workflow errors return sanitized 4xx responses.
+- Provider error bodies and secrets are not returned to the browser.

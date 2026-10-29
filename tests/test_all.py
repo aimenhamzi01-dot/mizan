@@ -124,7 +124,10 @@ class HttpServer(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.auth_token = "mizan-test-judge-token-0123456789abcdef"
-        cls._auth_env = patch.dict(os.environ, {"MIZAN_JUDGE_TOKEN": cls.auth_token})
+        cls._auth_env = patch.dict(os.environ, {
+            "MIZAN_JUDGE_TOKEN": cls.auth_token,
+            "MODEL_API_KEY": "mizan-test-owner-key-never-real",
+        })
         cls._auth_env.start()
         cls.srv = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.srv.server_address[1]
@@ -178,7 +181,7 @@ class HttpServer(unittest.TestCase):
         s, _ = self.call("/api/triage", {"report": ""}); self.assertEqual(s, 400)
         def boom(m, **kw): raise meta_client.MetaAPIError("no key", 401)
         meta_client.chat = boom
-        s, _ = self.call("/api/triage", {"report": "r", "confirm_egress": True}); self.assertEqual(s, 401)
+        s, _ = self.call("/api/triage", {"report": "r", "confirm_egress": True}); self.assertEqual(s, 502)
         meta_client.chat = lambda m, **kw: 1 / 0
         s, b = self.call("/api/triage", {"report": "r", "confirm_egress": True}); self.assertEqual(s, 500); self.assertNotIn(b"Traceback", b)
         s, _ = self.call("/api/nope", {}); self.assertEqual(s, 404)

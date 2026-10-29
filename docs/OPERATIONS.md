@@ -1,69 +1,93 @@
-# Self-Hosted Operations Guide
+# Self-Hosted Team Operations Guide
 
-## Local installation and access
+## 1. Initial installation
 
-Each researcher runs an independent Mizan instance. There is no central service or shared account. From a fresh clone, start Docker and initialize a private configuration with one command:
+Requirements: Docker Engine and Docker Compose v2. From a trusted host:
 
 ```bash
+git clone https://github.com/aimenhamzi01-dot/mizan.git
+cd mizan
 python3 scripts/run.py
 ```
 
-The launcher creates `.env` if needed, generates a random per-install token, prints it once, then builds and starts Docker Compose. Alternatively, prepare the configuration first with `python3 scripts/bootstrap.py`, save the printed token privately, then run `docker compose up --build`.
+The launcher creates a private `.env`, generates an installation-owner token, prints that token once, creates a separate AES-GCM encryption key without printing it, then builds and starts Compose. Keep the owner token and `.env` in a private location. Open `http://127.0.0.1:8000` and sign in with the owner token.
 
-### Docker Compose (recommended)
+Alternatively, run `python3 scripts/bootstrap.py` to prepare `.env` first, save the one-time owner token securely, then start with `docker compose up --build`.
 
-Requirements: Docker Engine and Docker Compose v2. The web UI is available at `http://127.0.0.1:8000`. Compose publishes only on loopback. The container runs as a non-root user with a read-only root filesystem, drops Linux capabilities, and enables a minimal health check.
+The container runs non-root, with a read-only root filesystem, dropped capabilities, and a volume at `/app/data`. The Docker volume is named `<COMPOSE_PROJECT_NAME>_mizan-data`; the project name is generated per installation. `docker compose down` preserves data. `docker compose down -v` deletes it.
 
-SQLite is stored in the Compose volume key `mizan-data`. Its actual Docker volume name is prefixed by this installation's unique `COMPOSE_PROJECT_NAME`, which the bootstrap script stores in `.env`. This keeps separately bootstrapped clones from sharing the same volume. `docker compose down` stops the app and preserves data; `docker compose down -v` deletes this installation's data volume.
+## 2. Create workspaces and users
 
-To enable live analysis, set your own Meta API key in the private `.env` file as `MODEL_API_KEY=...`, then restart:
+The installation owner has global administrative access. In the **Workspace administration** panel:
 
-```bash
-docker compose up -d --build
+1. Create a workspace for each independent research group.
+2. Select a workspace, enter a unique username and role, then issue an individual user token.
+3. Deliver the token privately. It is displayed once and cannot be retrieved later.
+4. To recover from a lost token, rotate it. The prior token becomes invalid immediately; deliver the new one privately. To remove access entirely, revoke the user.
+
+Workspace admins can manage members in their own workspace, but cannot create other workspace admins or workspaces. Analysts may submit/analyze, reviewers may record human dispositions, and viewers are read-only. All members of the same workspace can see its cases; the system does not provide per-case ownership. The installation owner can see every workspace.
+
+Tokens are bearer secrets with no automatic expiry. Store them in an approved password manager or secret channel. Never put them in a URL, public issue, shared terminal history, source file, or screenshot. If the installation-owner token is compromised, update `MIZAN_JUDGE_TOKEN` in `.env` and restart; this rotates global access.
+
+## 3. Researcher-specific Meta keys and usage
+
+Each researcher signs in with their personal token, opens **Your Meta API key**, and saves a provider key they are authorized to use. The key is encrypted in the local SQLite database with AES-256-GCM and the private `MIZAN_ENCRYPTION_KEY` from `.env`. Mizan never returns the saved key to the browser. Each user's analysis uses only that user's saved key; the optional `MODEL_API_KEY` environment variable is a legacy fallback for the installation owner only.
+
+Each researcher is responsible for their provider account, authorization, and usage charges. No Mizan service pays or shares a provider key. Live analysis sends the selected report and snippet to `META_API_BASE` only after an explicit confirmation. Use only a trusted endpoint.
+
+### Encryption-key backup and recovery
+
+Back up `.env` securely along with the SQLite database/volume. `MIZAN_ENCRYPTION_KEY` is essential: losing it makes stored researcher keys unrecoverable. Do not delete it, regenerate it, or rotate it casually. Bootstrap records a version marker and refuses to replace a previously initialized but missing/invalid key. To intentionally rotate it, first design and test a re-encryption migration with a secure backup; direct replacement will make existing encrypted keys unreadable.
+
+## 4. Private remote team access
+
+The default service is available only on `127.0.0.1:8000`. For team members on a private network, keep the app bound to loopback and configure a trusted same-host TLS reverse proxy. Set exact values in the private `.env`, for example:
+
+```dotenv
+MIZAN_ALLOWED_HOSTS=triage.internal.example
+MIZAN_ALLOWED_ORIGINS=https://triage.internal.example
+MIZAN_PUBLISH_HOST=127.0.0.1
 ```
 
-Each researcher uses their own provider account and is responsible for the associated model usage charges. Mizan does not provide a central paid API key. Keep `.env` out of Git and restrict its permissions; the bootstrap script sets mode `0600` on POSIX systems.
+Configure the proxy to terminate TLS, redirect/require HTTPS, preserve the intended `Host` header, enforce organizational access controls, and prevent bypass of the proxy. Mizan only validates configured Host/Origin values; it does not terminate TLS, inspect proxy identity, or provide rate limiting. Never bind directly to `0.0.0.0` on a public interface or expose the port to the internet.
 
-### Direct Python mode
+## 5. Direct Python mode
 
-Python 3.9 or newer is required; no third-party Python packages are needed.
+Python 3.9 or newer is required. From the repository root:
 
 ```bash
+python3 -m pip install -r requirements.txt
 python3 scripts/bootstrap.py
 python3 server.py
 ```
 
-The server binds to `127.0.0.1` by default and uses port `8000`. The default SQLite path is `data/mizan.sqlite3`. Set `PORT` or `MIZAN_DB_PATH` in `.env` to customize these values. The Python server does not include TLS termination and must not be exposed directly to an untrusted network.
+Python mode binds to `127.0.0.1:8000` and defaults to `data/mizan.sqlite3`. Configure `PORT` or `MIZAN_DB_PATH` in the private environment as needed. The default data directory is restricted to `0700` and the database file to `0600` on POSIX systems.
 
-## Model API setup
+## 6. Upgrade and migration
 
-Live analysis is optional. Set `MODEL_API_KEY` in the private `.env` file or local process environment to a key you are authorized to use. `META_API_KEY` and `META_MODEL_API_KEY` are also accepted. The key is loaded by the server and is not stored in the case database. Never paste keys into reports, review notes, or source code.
+On startup, Mizan upgrades the SQLite schema to version 2. Existing cases are assigned to the `default` workspace and remain accessible to the installation owner. After upgrading an older `.env`, run the bootstrap script once to generate `MIZAN_ENCRYPTION_KEY`; do not overwrite an already initialized key. Create new workspaces and accounts after the migration.
 
-The configured `META_API_BASE` receives the bearer key and report/code contents when a researcher explicitly confirms a live analysis. Use only a trusted provider endpoint. Built-in examples are synthetic; loading and saving them does not call the model. The compatibility route's canned responses are also local-only.
+Before upgrading, back up both the database volume and `.env`. Keep the encryption key matched to the database snapshot. If a key is missing after it was initialized, restore the original `.env` from backup rather than allowing a replacement.
 
-## Local database and retention
+## 7. Storage, privacy, and retention
 
-Python mode creates `data/mizan.sqlite3` by default. Docker mode stores the database in this installation's project-scoped `mizan-data` volume. On POSIX systems, Mizan restricts the default Python data directory to `0700` and the database file to `0600`. The Docker volume is mounted at `/app/data`, owned by the non-root application user. SQLite data is plaintext and not encrypted by this application.
+The SQLite database stores report bodies, pasted code, recommendations, reviewer names/notes, and audit events as plaintext. The provider keys alone are encrypted. Protect the host, volume, `.env`, and backups with restrictive access. Mizan has no automatic retention expiry or centralized recovery service. Deleting a case removes it and its application-level history, but cannot erase backups or guarantee physical-media sanitization.
 
-The database contains original report text, source snippets, model recommendations, reviewer labels/notes, and application-level events. There is no automatic retention expiry. Cases remain until deleted or the database/volume is removed. Deletion cannot guarantee forensic erasure from backups, snapshots, or underlying storage.
+For Docker backups, identify the named volume with `docker volume ls`; it uses the installation's Compose project prefix. Stop the app before a simple file-level copy. Protect backups with restrictive filesystem permissions and a defined retention policy. Do not commit backups or `.env`.
 
-## Backup and restore
+## 8. Health and API access
 
-Backups contain plaintext security reports. Stop Mizan before making a file-level copy. For direct Python mode, use SQLite's online backup API while the service is running, or stop the server before copying the database.
-
-For Docker, use a documented Docker named-volume backup/restore procedure. Determine the exact volume with `docker volume ls`; it has the form `<COMPOSE_PROJECT_NAME>_mizan-data`, where the unique project name is recorded in the private `.env`. Stop the service for a simple file-level backup. Protect backup files with restrictive permissions and delete them according to your own retention policy. Do not commit database files or backups.
-
-## Health check
-
-`GET /healthz` returns only `{"ok":true}` and is unauthenticated so Docker can determine whether the process is ready. The endpoint does not expose case data or whether a model key is configured. All `/api/*` routes remain protected by the per-install Bearer token.
+`GET /healthz` is unauthenticated and returns only `{"ok":true}` for container readiness. All `/api/*` routes require an owner or user Bearer token. The owner token has global rights; user tokens are workspace-scoped and role-limited. See [API.md](API.md) for route behavior.
 
 ## Troubleshooting
 
-- **Docker Compose says the judge token is missing:** run `python3 scripts/bootstrap.py` and keep the generated `.env` file.
-- **HTTP 503 on an API route:** `MIZAN_JUDGE_TOKEN` is missing or shorter than 32 bytes in the server environment.
-- **HTTP 401 / sign-in rejected:** enter the token for this local installation; reloading or locking clears the browser's in-memory token.
-- **Port 8000 is in use:** set `PORT=9000` in `.env` and restart Compose. The default Compose mapping keeps the host and container ports aligned and remains bound to `127.0.0.1`.
-- **No Meta API key:** local intake, queue, human review, and synthetic examples still work; live analysis remains unavailable.
-- **Model API error:** check your own key, service availability, configured model names, and trusted `META_API_BASE`. Provider details are intentionally not returned to the browser.
-- **Database locked:** ensure another Mizan process is not using the same SQLite database. Writes use a five-second busy timeout.
-- **Lost local data:** Mizan cannot recover deleted cases without an operator-managed backup.
+- **Compose says owner token or encryption key is missing:** run `python3 scripts/bootstrap.py` and confirm `.env` is present. Do not commit or upload it.
+- **Bootstrap says restore the original encryption key:** restore the matching private `.env` backup; do not generate a new key over the database.
+- **HTTP 503 on an API route:** no owner token is configured and no provisioned user is available, or the local identity store could not initialize.
+- **HTTP 401 / sign-in rejected:** use a valid, non-revoked personal token. Admins can rotate a user's token if necessary.
+- **HTTP 403:** the role does not permit the requested action, or the Host/Origin is not allow-listed.
+- **HTTP 404 for a case:** it may not exist or may belong to another workspace.
+- **Port 8000 is in use:** set `PORT=9000` in `.env` and restart Compose.
+- **Researcher cannot analyze:** they must save their own provider key in the profile and explicitly confirm egress.
+- **Key decryption fails:** verify `MIZAN_ENCRYPTION_KEY` matches the database backup.
+- **Database locked:** ensure another Mizan process is not using the same SQLite path; writes use a five-second busy timeout.

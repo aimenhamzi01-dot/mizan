@@ -27,7 +27,7 @@ h1{margin:0;font-size:1.4rem;letter-spacing:-.03em}.subtitle{color:var(--muted);
 .metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:20px}.metric{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:15px 17px}.metric span{display:block;color:var(--muted);font-size:.8rem}.metric b{display:block;font-size:1.65rem;line-height:1.2;margin-top:7px;letter-spacing:-.04em}
 .workspace{display:grid;grid-template-columns:minmax(310px,.82fr) minmax(0,1.5fr);gap:18px;align-items:start}.column{display:grid;gap:16px}.card{background:linear-gradient(180deg,rgba(255,255,255,.014),transparent 70%),var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}.card h2{margin:0 0 4px;font-size:1.02rem;letter-spacing:-.01em}.card-intro{color:var(--muted);font-size:.84rem;margin:0 0 16px}
 .field{display:grid;gap:6px;margin:13px 0}.field label,.label{font-size:.82rem;font-weight:700;color:#cbd5e5}.field small,.hint{font-size:.76rem;color:var(--muted)}
-input[type=text],textarea,select{width:100%;border:1px solid var(--line);border-radius:9px;background:var(--panel2);color:var(--ink);padding:10px 12px}textarea{resize:vertical;min-height:132px;line-height:1.5}textarea.code{min-height:110px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.82rem;direction:ltr;text-align:left;unicode-bidi:plaintext}input::placeholder,textarea::placeholder{color:#64738b}
+input[type=text],input[type=password],textarea,select{width:100%;border:1px solid var(--line);border-radius:9px;background:var(--panel2);color:var(--ink);padding:10px 12px}textarea{resize:vertical;min-height:132px;line-height:1.5}textarea.code{min-height:110px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.82rem;direction:ltr;text-align:left;unicode-bidi:plaintext}input::placeholder,textarea::placeholder{color:#64738b}
 .actions{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:14px}.btn{border:1px solid var(--line);border-radius:9px;padding:9px 13px;background:#18243a;color:var(--ink);font-weight:700;font-size:.84rem}.btn:hover:not(:disabled){filter:brightness(1.12)}.btn.primary{background:var(--accent);color:#06211e;border-color:var(--accent)}.btn.ghost{background:transparent}.btn.danger{color:#ffc2c2;border-color:#713f4c;background:rgba(136,45,58,.16)}.btn.small{font-size:.76rem;padding:6px 9px}.btn:disabled{opacity:.45;cursor:not-allowed}
 .samples{display:flex;gap:7px;flex-wrap:wrap}.samples button{color:#bed0e8;font-weight:600}
 .consent{display:flex;align-items:flex-start;gap:9px;margin-top:14px;padding:11px;background:#0b1424;border:1px solid var(--line);border-radius:9px;color:var(--muted);font-size:.8rem}.consent input{margin:3px 0 0;accent-color:var(--accent)}.consent strong{color:var(--ink)}
@@ -48,25 +48,52 @@ footer{color:var(--muted);font-size:.76rem;margin-top:22px;text-align:center}cod
 <body>
 <div id="authGate" class="auth-overlay" role="dialog" aria-modal="true" aria-labelledby="authTitle">
   <form id="authForm" class="auth-card">
-    <h2 id="authTitle">Judge access</h2>
-    <p>Enter the private judge token to unlock the Mizan workbench. The token is sent in an Authorization header and kept in browser memory only.</p>
-    <label for="judgeToken">Access token</label>
+    <h2 id="authTitle">Researcher sign-in</h2>
+    <p>Enter your individual Mizan access token issued by the workspace administrator. It is sent in an Authorization header and kept in browser memory only.</p>
+    <label for="judgeToken">Personal access token</label>
     <input id="judgeToken" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" required aria-describedby="authHint authMessage">
-    <p id="authHint">Lock or reload this page to clear the token. Do not share it in a public issue or URL.</p>
-    <button id="unlockButton" class="btn primary" type="submit">Unlock workbench</button>
+    <p id="authHint">Lock or reload this page to clear the token. Never share it in a public issue, URL, or chat.</p>
+    <button id="unlockButton" class="btn primary" type="submit">Sign in</button>
     <p id="authMessage" class="auth-message" role="status" aria-live="polite"></p>
   </form>
 </div>
 <div class="shell">
   <header class="topbar">
     <div class="brand"><div class="mark" aria-hidden="true">M</div><div><h1>Mizan</h1><div class="subtitle">Security report triage · Human review workbench</div></div></div>
-    <div class="top-actions"><span class="pill"><span class="dot online"></span>Local-only server</span><span class="pill" id="apiStatus"><span class="dot"></span>Judge sign-in required</span><button id="lockBtn" class="btn small ghost" type="button" hidden>Lock</button></div>
+    <div class="top-actions"><span class="pill"><span class="dot online"></span>Self-hosted workspace</span><span class="pill" id="accountBadge" hidden></span><span class="pill" id="apiStatus"><span class="dot"></span>Sign-in required</span><button id="lockBtn" class="btn small ghost" type="button" hidden>Sign out</button></div>
   </header>
 
   <div class="notice" role="note">
     <span class="icon" aria-hidden="true">ⓘ</span>
-    <p><strong>Read-only review.</strong> Mizan never runs submitted code, exploits, or reproduction steps and never contacts a reported target. Reports and snippets are stored as plaintext in the local SQLite database. They are sent to Meta only if you explicitly select a case and confirm analysis. Recommendations are not final decisions.</p>
+    <p><strong>Read-only review.</strong> Mizan never runs submitted code, exploits, or reproduction steps and never contacts a reported target. Cases are scoped to a workspace; reports and snippets are stored as plaintext in the local SQLite database. Each researcher's Meta key is encrypted at rest and is sent with report content only after that researcher explicitly confirms analysis. Recommendations are not final decisions.</p>
   </div>
+
+  <article id="profileCard" class="card" hidden>
+    <h2>Your Meta API key</h2>
+    <p class="card-intro">Each researcher uses their own Meta API key and pays for their own model usage. Mizan encrypts it at rest with the installation key; it is never returned to the browser after saving.</p>
+    <p id="modelKeyStatus" class="hint">Checking your key status…</p>
+    <form id="modelKeyForm">
+      <div class="field"><label for="modelKeyInput">Meta Model API key</label><input id="modelKeyInput" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false" maxlength="512" placeholder="Paste your personal key"></div>
+      <div class="actions"><button class="btn primary" id="saveModelKeyBtn" type="submit">Save encrypted key</button><button class="btn ghost" id="deleteModelKeyBtn" type="button">Remove my key</button></div>
+    </form>
+  </article>
+
+  <article id="adminCard" class="card" hidden>
+    <h2>Workspace administration</h2>
+    <p class="card-intro">Create workspaces and issue individual access tokens. A token is shown once; deliver it to its owner through a private channel.</p>
+    <form id="workspaceForm" hidden>
+      <div class="field"><label for="workspaceNameInput">New workspace name</label><input id="workspaceNameInput" type="text" maxlength="80" required placeholder="Security Research Team"></div>
+      <button class="btn" type="submit">Create workspace</button>
+    </form>
+    <form id="userForm">
+      <div class="field"><label for="userNameInput">New username</label><input id="userNameInput" type="text" maxlength="64" required autocomplete="off" placeholder="researcher.alex"></div>
+      <div class="field"><label for="userRoleInput">Role</label><select id="userRoleInput"><option value="analyst">Analyst — submit and analyze</option><option value="reviewer">Reviewer — review and disposition</option><option value="viewer">Viewer — read only</option><option value="admin">Workspace administrator</option></select></div>
+      <div class="field"><label for="userWorkspaceInput">Workspace</label><select id="userWorkspaceInput" required></select></div>
+      <button class="btn primary" type="submit">Create user and issue token</button>
+    </form>
+    <pre id="issuedToken" class="text-block" hidden aria-live="polite"></pre>
+    <div class="section"><h3>Members</h3><div id="memberList" class="history"></div></div>
+  </article>
 
   <div id="flash" class="flash" role="status" aria-live="polite" hidden></div>
 
@@ -103,11 +130,11 @@ footer{color:var(--muted);font-size:.76rem;margin-top:22px;text-align:center}cod
       <div id="detail" hidden></div>
     </section>
   </main>
-  <footer>Mizan is a local prototype. Token authentication does not make this server safe for public-network deployment. Human reviewers remain responsible for every final disposition.</footer>
+  <footer>Mizan is self-hosted. Personal tokens and workspace roles do not replace TLS, private network controls, backups, or an operational security review. Do not expose the application directly to the public internet. Human reviewers remain responsible for every final disposition.</footer>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
-const state = {hasKey:false, selectedId:null, reports:[], flashTimer:null, token:""};
+const state = {hasKey:false, selectedId:null, reports:[], flashTimer:null, token:"", principal:null};
 const decisionLabels = {accept:"Accept", "need-info":"Need info", duplicate:"Duplicate", reject:"Reject"};
 
 function node(tag, className, text){
@@ -128,19 +155,22 @@ async function api(path, options={}){
   const response = await fetch(path, Object.assign({}, options, {headers, cache:"no-store"}));
   let body = {};
   try { body = await response.json(); } catch {}
-  if((response.status===401 || response.status===503) && state.token) lockWorkbench("Judge access was rejected or is not configured. Enter a valid token or check the server configuration.");
+  if((response.status===401 || response.status===503) && state.token) lockWorkbench("Your access was rejected or the local identity service is unavailable. Sign in with a valid personal token.");
   if(!response.ok) throw new Error(body.error || `Request failed (${response.status}).`);
   return body;
 }
-function lockWorkbench(message="Enter the private judge token to unlock the workbench."){
-  state.token="";state.hasKey=false;state.selectedId=null;state.reports=[];
+function lockWorkbench(message="Enter your personal access token to open the workbench."){
+  state.token="";state.hasKey=false;state.selectedId=null;state.reports=[];state.principal=null;
   $("authGate").hidden=false;$("lockBtn").hidden=true;$("judgeToken").value="";
+  $("accountBadge").hidden=true;$("profileCard").hidden=true;$("adminCard").hidden=true;
+  $("modelKeyInput").value="";$("issuedToken").textContent="";$("issuedToken").hidden=true;
+  $("newReportForm").hidden=false;
   $("authMessage").textContent=message;
   $("caseList").replaceChildren(node("div","empty","Sign in to load protected cases."));
   $("detail").replaceChildren();$("detail").hidden=true;$("detailEmpty").hidden=false;
   ["metricTotal","metricReceived","metricAnalyzed","metricReviewed"].forEach(id=>$(id).textContent="—");
   $("newReportForm").reset();setCounts();
-  const badge=$("apiStatus");badge.replaceChildren(node("span","dot"),document.createTextNode("Judge sign-in required"));
+  const badge=$("apiStatus");badge.replaceChildren(node("span","dot"),document.createTextNode("Sign-in required"));
   if(message) $("judgeToken").focus();
 }
 function formatDate(value){
@@ -155,7 +185,52 @@ function setCounts(){
 function renderHealth(health){
   state.hasKey = Boolean(health.has_key);
   const badge = $("apiStatus"); badge.replaceChildren();
-  const dot = node("span", "dot" + (state.hasKey ? " online" : "")); badge.append(dot, document.createTextNode(state.hasKey ? "Meta API configured" : "No Meta API key"));
+  const dot = node("span", "dot" + (state.hasKey ? " online" : "")); badge.append(dot, document.createTextNode(state.hasKey ? "Meta key ready" : "Add your Meta key"));
+}
+async function loadProfile(){
+  const me = await api("/api/me"); state.principal = me;
+  const account = $("accountBadge"); account.textContent = `${me.username} · ${me.role}`; account.hidden = false;
+  $("profileCard").hidden = false;
+  $("modelKeyStatus").textContent = me.has_model_key ? "Your personal key is configured. The raw key is not shown or sent back by Mizan." : "No personal Meta API key is saved yet. Add one to enable live analysis.";
+  const canAdmin = me.role === "admin";
+  $("adminCard").hidden = !canAdmin;
+  if(canAdmin) await loadAdminPanel();
+}
+async function loadAdminPanel(){
+  const me = state.principal;
+  $("workspaceForm").hidden = !me.is_root;
+  const adminRole = $("userRoleInput").querySelector('option[value="admin"]'); adminRole.hidden = !me.is_root;
+  const workspaceData = await api("/api/workspaces");
+  const selector = $("userWorkspaceInput"); selector.replaceChildren();
+  (workspaceData.workspaces || []).forEach(workspace=>{
+    const option = node("option", "", workspace.name); option.value = workspace.id; selector.append(option);
+  });
+  if(!me.is_root && me.workspace_id) selector.value = me.workspace_id;
+  const memberData = await api("/api/admin/users"); const list = $("memberList"); list.replaceChildren();
+  (memberData.users || []).forEach(user=>{
+    const row = node("div", "event"); const body = node("div", "event-body");
+    body.append(node("strong", "", `${user.username} · ${user.role}`), node("small", "", `${user.active ? "Active" : "Revoked"} · ${user.workspace_id}`));
+    row.append(body);
+    if(user.active && user.id !== me.id){
+      const rotate = node("button", "btn small", "Rotate token"); rotate.type = "button";
+      rotate.addEventListener("click", async ()=>{
+        if(!window.confirm(`Rotate ${user.username}'s token? The old token will stop working immediately.`)) return;
+        try{
+          const result = await api(`/api/admin/users/${encodeURIComponent(user.id)}/rotate-token`,{method:"POST",body:JSON.stringify({})});
+          $("issuedToken").textContent = `${user.username}\n${result.token_notice}\n\n${result.token}`;$("issuedToken").hidden=false;
+          flash("Token rotated. Deliver the new token privately.");
+        }catch(error){flash(error.message,"error");}
+      }); body.append(rotate);
+      const revoke = node("button", "btn small danger", "Revoke token"); revoke.type = "button";
+      revoke.addEventListener("click", async ()=>{
+        if(!window.confirm(`Revoke access for ${user.username}? This takes effect immediately.`)) return;
+        try{await api(`/api/admin/users/${encodeURIComponent(user.id)}`,{method:"DELETE"});flash("User token revoked.");await loadAdminPanel();}
+        catch(error){flash(error.message,"error");}
+      }); body.append(revoke);
+    }
+    list.append(row);
+  });
+  if(!(memberData.users || []).length) list.append(node("p", "hint", "No additional users have been provisioned."));
 }
 async function loadHealth(){
   try{ renderHealth(await api("/api/health")); }
@@ -255,12 +330,13 @@ function renderDetail(report, events){
   const details = node("p", "hint", `Received ${formatDate(report.created_at)} · Language: ${report.language === "ar" ? "Arabic" : "English"}`); root.append(details);
   const topActions = node("div", "actions");
   const analyze = node("button", "btn primary", report.analysis ? "Run analysis again" : "Analyze with Meta"); analyze.type = "button";
-  analyze.disabled = !state.hasKey || report.status === "reviewed";
+  analyze.disabled = !state.hasKey || report.status === "reviewed" || !["admin","analyst"].includes(state.principal?.role);
   analyze.addEventListener("click", ()=>analyzeReport(report.id));
   const remove = node("button", "btn danger", "Delete case and local history"); remove.type = "button";
+  remove.hidden = state.principal?.role !== "admin";
   remove.addEventListener("click", ()=>deleteReport(report.id));
   topActions.append(analyze, remove); root.append(topActions);
-  if(!state.hasKey){ root.append(node("p", "hint", "To run live analysis, configure MODEL_API_KEY in the local .env file. Built-in examples still work without it.")); }
+  if(!state.hasKey){ root.append(node("p", "hint", "Add your personal Meta API key in the account panel to enable live analysis. Built-in examples remain local.")); }
   appendTextSection(root, "Original report · untrusted text", report.report);
   if(report.code) appendTextSection(root, "Supplied source · read-only context", report.code, true);
   renderAnalysis(root, report);
@@ -270,6 +346,10 @@ function renderDetail(report, events){
 function renderReview(parent, report){
   const section = node("section", "section"); section.append(node("h3", "", "Human disposition"));
   section.append(node("p", "review-warning", "The model's suggestion is not applied automatically. Saving a disposition records your choice locally; it does not close a ticket, contact a program, or send the draft reply."));
+  if(!["admin","reviewer"].includes(state.principal?.role)){
+    section.append(node("p", "hint", "Your workspace role is read-only for human dispositions.")); parent.append(section); return;
+  }
+  section.append(node("p", "hint", `Reviewing as authenticated user: ${state.principal.username}`));
   const box = node("div", "review-box"); const form = node("form", "");
   const decisionField = node("div", "field"); const decisionLabel = node("label", "", "Final decision — choose explicitly"); decisionLabel.htmlFor = "reviewDecision";
   const decision = node("select", ""); decision.id = "reviewDecision"; decision.required = true;
@@ -277,12 +357,10 @@ function renderReview(parent, report){
   Object.entries(decisionLabels).forEach(([key,label])=>{ const option=node("option","",label); option.value=key; decision.append(option); });
   if(report.review_decision) decision.value = report.review_decision;
   decisionField.append(decisionLabel, decision); form.append(decisionField);
-  const reviewerField=node("div","field");const reviewerLabel=node("label","","Reviewer label (optional)");reviewerLabel.htmlFor="reviewerInput";
-  const reviewer=node("input","");reviewer.type="text";reviewer.id="reviewerInput";reviewer.maxLength=120;reviewer.value=report.reviewer||"";reviewer.placeholder="Local reviewer";reviewerField.append(reviewerLabel,reviewer);form.append(reviewerField);
   const noteField=node("div","field");const noteLabel=node("label","","Review note (optional)");noteLabel.htmlFor="reviewNote";
   const note=node("textarea","");note.id="reviewNote";note.maxLength=4000;note.value=report.review_note||"";note.placeholder="Record why you accept, reject, request information, or mark as duplicate.";noteField.append(noteLabel,note);form.append(noteField);
   const save=node("button","btn primary","Save human review");save.type="submit";form.append(save);
-  form.addEventListener("submit", async e=>{e.preventDefault();if(!decision.value){flash("Choose a human decision before saving.","error");return;}save.disabled=true;try{await api(`/api/reports/${encodeURIComponent(report.id)}/review`,{method:"POST",body:JSON.stringify({decision:decision.value,reviewer:reviewer.value,note:note.value})});flash("Human review saved locally.");await refreshAll(report.id);}catch(err){flash(err.message,"error");save.disabled=false;}});
+  form.addEventListener("submit", async e=>{e.preventDefault();if(!decision.value){flash("Choose a human decision before saving.","error");return;}save.disabled=true;try{await api(`/api/reports/${encodeURIComponent(report.id)}/review`,{method:"POST",body:JSON.stringify({decision:decision.value,note:note.value})});flash("Human review saved locally.");await refreshAll(report.id);}catch(err){flash(err.message,"error");save.disabled=false;}});
   box.append(form);section.append(box);parent.append(section);
 }
 async function analyzeReport(id){
@@ -317,16 +395,43 @@ $("statusFilter").addEventListener("change",loadReports);
 let searchTimer=null;$("searchInput").addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(loadReports,250);});
 document.querySelectorAll("[data-sample]").forEach(button=>button.addEventListener("click",()=>loadSample(button.dataset.sample)));
 
+$("modelKeyForm").addEventListener("submit",async e=>{
+  e.preventDefault();const key=$("modelKeyInput").value.trim();if(!key){flash("Paste your personal API key first.","error");return;}
+  const button=$("saveModelKeyBtn");button.disabled=true;
+  try{await api("/api/me/model-key",{method:"PUT",body:JSON.stringify({api_key:key})});$("modelKeyInput").value="";flash("Your key was encrypted and saved.");await loadProfile();await loadHealth();}
+  catch(error){flash(error.message,"error");}finally{button.disabled=false;}
+});
+$("deleteModelKeyBtn").addEventListener("click",async()=>{
+  if(!window.confirm("Remove your encrypted Meta API key from this installation?"))return;
+  try{await api("/api/me/model-key",{method:"DELETE"});$("modelKeyInput").value="";flash("Your Meta API key was removed.");await loadProfile();await loadHealth();}
+  catch(error){flash(error.message,"error");}
+});
+$("workspaceForm").addEventListener("submit",async e=>{
+  e.preventDefault();const name=$("workspaceNameInput").value.trim();if(!name)return;
+  try{await api("/api/admin/workspaces",{method:"POST",body:JSON.stringify({name})});$("workspaceForm").reset();flash("Workspace created.");await loadAdminPanel();}
+  catch(error){flash(error.message,"error");}
+});
+$("userForm").addEventListener("submit",async e=>{
+  e.preventDefault();const username=$("userNameInput").value.trim();const workspace_id=$("userWorkspaceInput").value;const role=$("userRoleInput").value;
+  if(!username||!workspace_id){flash("Enter a username and select a workspace.","error");return;}
+  try{
+    const result=await api("/api/admin/users",{method:"POST",body:JSON.stringify({username,role,workspace_id})});
+    $("issuedToken").textContent=`${result.user.username} · ${result.user.role}\n${result.token_notice}\n\n${result.token}`;$("issuedToken").hidden=false;
+    $("userNameInput").value="";flash("User created. Copy the token now; it cannot be retrieved later.");await loadAdminPanel();
+  }catch(error){flash(error.message,"error");}
+});
+
 $("authForm").addEventListener("submit",async e=>{
-  e.preventDefault();const token=$("judgeToken").value.trim();if(!token){$("authMessage").textContent="Enter the judge token.";return;}
+  e.preventDefault();const token=$("judgeToken").value.trim();if(!token){$("authMessage").textContent="Enter your personal access token.";return;}
   const button=$("unlockButton");button.disabled=true;state.token=token;$("authMessage").textContent="Checking token…";
   try{
-    const health=await api("/api/health");renderHealth(health);$("authGate").hidden=true;$("lockBtn").hidden=false;$("judgeToken").value="";$("authMessage").textContent="";
-    await refreshAll(null);flash("Judge access verified. The token remains in memory until you lock or reload this page.");
-  }catch(err){state.token="";$("authGate").hidden=false;$("lockBtn").hidden=true;$("judgeToken").value="";$("authMessage").textContent="Access was not granted. Check the token and server configuration.";}
+    await loadProfile();const health=await api("/api/health");renderHealth(health);$("authGate").hidden=true;$("lockBtn").hidden=false;$("judgeToken").value="";$("authMessage").textContent="";
+    $("newReportForm").hidden = !["admin","analyst"].includes(state.principal?.role);
+    await refreshAll(null);flash(`Signed in as ${state.principal.username}. Your token remains in memory until sign-out or reload.`);
+  }catch(err){state.token="";state.principal=null;$("authGate").hidden=false;$("lockBtn").hidden=true;$("judgeToken").value="";$("authMessage").textContent="Access was not granted. Check your personal token and workspace configuration.";}
   finally{button.disabled=false;if(!$("authGate").hidden) $("judgeToken").focus();}
 });
-$("lockBtn").addEventListener("click",()=>lockWorkbench());
+$("lockBtn").addEventListener("click",()=>{ $("newReportForm").hidden=false; lockWorkbench(); });
 setCounts();$("judgeToken").focus();
 </script>
 </body>
