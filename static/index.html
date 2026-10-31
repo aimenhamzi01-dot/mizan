@@ -40,7 +40,7 @@ input[type=text],input[type=password],textarea,select{width:100%;border:1px soli
 footer{color:var(--muted);font-size:.76rem;margin-top:22px;text-align:center}code{font-family:ui-monospace,monospace;color:#b7d2ff}
 @media(max-width:950px){.workspace{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:560px){.shell{padding:18px 12px 36px}.topbar{align-items:flex-start;flex-direction:column}.top-actions{justify-content:flex-start}.metrics{gap:8px}.metric{padding:12px}.metric b{font-size:1.35rem}.card{padding:14px}.result-grid{grid-template-columns:1fr}.result-cell.wide{grid-column:auto}.notice{font-size:.84rem}}
-.evidence-list{display:grid;gap:9px}.evidence-item{background:var(--panel2);border:1px solid #1c2940;border-radius:10px;padding:12px}.evidence-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}.evidence-pill{border:1px solid var(--line);border-radius:999px;padding:3px 8px;font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#cbd5e5}.evidence-pill.verified{color:var(--good);border-color:#34715c}.evidence-pill.unverified{color:var(--bad);border-color:#71414d}.evidence-quote{margin:0 0 8px;padding:10px;border-left:3px solid var(--accent);background:#0a1220;border-radius:4px;color:#e7edf6;white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext}.evidence-explanation{font-size:.8rem;color:#bdc9da;margin:0}.evidence-warning{font-size:.78rem;color:var(--warn);margin:8px 0 0}
+.evidence-list{display:grid;gap:9px}.evidence-item{background:var(--panel2);border:1px solid #1c2940;border-radius:10px;padding:12px}.evidence-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}.evidence-pill{border:1px solid var(--line);border-radius:999px;padding:3px 8px;font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#cbd5e5}.evidence-pill.verified{color:var(--good);border-color:#34715c}.evidence-pill.unverified{color:var(--bad);border-color:#71414d}.evidence-quote{margin:0 0 8px;padding:10px;border-left:3px solid var(--accent);background:#0a1220;border-radius:4px;color:#e7edf6;white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext}.evidence-explanation{font-size:.8rem;color:#bdc9da;margin:0}.evidence-warning{font-size:.78rem;color:var(--warn);margin:8px 0 0}.evidence-focus{outline:2px solid var(--accent);box-shadow:0 0 0 5px rgba(85,214,194,.18)}.challenge-status{font-weight:800;text-transform:uppercase;letter-spacing:.04em}.challenge-flagged{color:var(--warn)}.challenge-clear{color:var(--good)}
 .auth-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:18px;background:rgba(3,8,16,.88);backdrop-filter:blur(8px)}
 .auth-card{width:min(100%,430px);padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
 .auth-card h2{margin:0 0 8px}.auth-card p{color:var(--muted);font-size:.86rem}.auth-card input{width:100%;margin:8px 0 12px}.auth-card button{width:100%}.auth-message{min-height:1.4em;color:#ffc6c6!important;margin-bottom:0}
@@ -275,9 +275,10 @@ function addField(grid, label, value, wide=false, mono=false){
   const cell = node("div", "result-cell" + (wide ? " wide" : ""));
   cell.append(node("h4", "", label), node("p", mono ? "mono" : "", value || "Not provided.")); grid.append(cell);
 }
-function appendTextSection(parent, label, value, mono=false){
+function appendTextSection(parent, label, value, mono=false, id=""){
   const section = node("section", "section"); section.append(node("h3", "", label));
-  section.append(node("pre", "text-block" + (mono ? " mono" : ""), value || "Not provided.")); parent.append(section);
+  const block=node("pre", "text-block" + (mono ? " mono" : ""), value || "Not provided.");if(id)block.id=id;
+  section.append(block); parent.append(section);return block;
 }
 function renderEvidence(parent, analysis){
   const section = node("section", "section");
@@ -299,6 +300,11 @@ function renderEvidence(parent, analysis){
       head.append(node("span", "evidence-pill " + (item.verified ? "verified" : "unverified"), item.verified ? "Exact text match" : "No exact match"));
       card.append(head);
       card.append(node("blockquote", "evidence-quote", item.quote || "No quotation supplied."));
+      if(item.verified && item.source && Number.isInteger(item.match_count)){
+        const locate=node("button","btn small ghost",item.match_count>1?`Locate first of ${item.match_count} matches`:"Locate in source");
+        locate.type="button";locate.addEventListener("click",()=>focusEvidenceSource(item));card.append(locate);
+      }
+      if(item.ambiguous)card.append(node("p","evidence-warning",`This exact quote appears ${item.match_count} times in the stated source; the first occurrence is selected.`));
       if(item.explanation) card.append(node("p", "evidence-explanation", item.explanation));
       list.append(card);
     });
@@ -306,6 +312,42 @@ function renderEvidence(parent, analysis){
   }
   const gaps = Array.isArray(analysis.missing_context) ? analysis.missing_context : [];
   if(gaps.length) appendTextSection(section, "Context still to verify", gaps.map((gap,i)=>`${i+1}. ${gap}`).join("\n"));
+  parent.append(section);
+}
+function focusEvidenceSource(item){
+  const id=item.source==="report"?"source-report":item.source==="code"?"source-code":"";
+  const pre=id?document.getElementById(id):null;const text=pre?.firstChild;
+  if(!pre||!text||text.nodeType!==Node.TEXT_NODE)return;
+  const start=text.data.indexOf(item.quote||"");if(start<0)return;
+  const selection=window.getSelection();selection?.removeAllRanges();
+  const range=document.createRange();range.setStart(text,start);range.setEnd(text,start+(item.quote||"").length);selection?.addRange(range);
+  pre.scrollIntoView({behavior:"smooth",block:"center"});pre.classList.add("evidence-focus");
+  window.setTimeout(()=>pre.classList.remove("evidence-focus"),3000);
+}
+function renderChallenge(parent,challenge){
+  if(!challenge)return;
+  const section=node("section","section");section.append(node("h3","","Second-pass challenge · advisory"));
+  const status=challenge.status||"unavailable";
+  const message=status==="clear"?"No specific concern was found in this pass. This is not independent verification.":
+    status==="flagged"?"This pass raised a concern; the recommendation was downgraded to Need info for human review.":
+    status==="inconclusive"?"The available context was inconclusive; the recommendation was downgraded to Need info.":
+    status==="invalid-evidence"?"A challenge quote failed source verification; the recommendation was downgraded to Need info.":
+    "The second-pass challenge was unavailable or invalid. Review the first analysis cautiously.";
+  const statusLine=node("p","challenge-status "+(status==="clear"?"challenge-clear":"challenge-flagged"),`Challenge status: ${status.replaceAll("-"," ")}`);
+  section.append(statusLine,node("p","hint",challenge.summary||message));
+  if(challenge.summary&&challenge.summary!==message)section.append(node("p","hint",message));
+  (Array.isArray(challenge.issues)?challenge.issues:[]).forEach(item=>{
+    const card=node("article","evidence-item");const head=node("div","evidence-head");
+    head.append(node("span","evidence-pill",item.source||"unknown"),node("span","evidence-pill",item.relation||"context-needed"),node("span","evidence-pill "+(item.verified?"verified":"unverified"),item.verified?"Exact text match":"No exact match"));
+    card.append(head,node("blockquote","evidence-quote",item.quote||"No quotation supplied."));
+    if(item.verified&&item.source&&Number.isInteger(item.match_count)){
+      const locate=node("button","btn small ghost",item.match_count>1?`Locate first of ${item.match_count} matches`:"Locate in source");
+      locate.type="button";locate.addEventListener("click",()=>focusEvidenceSource(item));card.append(locate);
+    }
+    if(item.ambiguous)card.append(node("p","evidence-warning",`This exact quote appears ${item.match_count} times; the first occurrence is selected.`));
+    if(item.explanation)card.append(node("p","evidence-explanation",item.explanation));section.append(card);
+  });
+  const meta=challenge.analysis_meta;if(meta?.model){const tokens=meta.usage?.total_tokens?` · ${meta.usage.total_tokens} tokens`:"";section.append(node("p","hint",`Challenge model: ${meta.model} · ${meta.elapsed_ms||0} ms${tokens} · prompt ${meta.prompt_version||"unknown"}`));}
   parent.append(section);
 }
 function renderAnalysis(parent, report){
@@ -324,13 +366,22 @@ function renderAnalysis(parent, report){
   addField(grid, "Citation integrity", analysis.citation_integrity === "verified" ? "All quoted excerpts match their stated input source." : "Unverified — recommendation downgraded.");
   addField(grid, "Severity", `${analysis.severity || "none"} — ${analysis.severity_reasoning || "No reasoning supplied."}`);
   addField(grid, "Suggested decision", decisionLabels[analysis.decision] || analysis.decision);
+  if(analysis.primary_decision)addField(grid,"Primary-pass suggestion",decisionLabels[analysis.primary_decision]||analysis.primary_decision);
   addField(grid, "Decision reasoning", analysis.decision_reasoning, true);
   addField(grid, "Model-written code summary · not source-verified", analysis.code_evidence, true, true);
   addField(grid, "Prompt-injection phrases", (analysis.injection_attempts || []).join("\n") || "None reported.", true, true);
   addField(grid, "Reproduction steps (reported; not executed)", (analysis.repro_steps || []).map((s,i)=>`${i+1}. ${s}`).join("\n") || "None provided.", true);
   addField(grid, "Draft reply (not sent)", analysis.draft_reply, true);
+  const meta=analysis.analysis_meta;
+  if(meta){
+    addField(grid,"Model / prompt version",`${meta.model||"unknown"} · ${meta.prompt_version||"unknown"}`);
+    addField(grid,"Prompt SHA-256",meta.prompt_sha256||"Not available.",true,true);
+    const tokens=meta.usage?.total_tokens?` · ${meta.usage.total_tokens} tokens`:"";
+    addField(grid,"Model-call time",`${meta.elapsed_ms||0} ms${tokens}`);
+  }
   section.append(grid); parent.append(section);
   renderEvidence(parent, analysis);
+  renderChallenge(parent,analysis.challenge_pass);
 }
 function renderHistory(parent, events){
   const section = node("section", "section"); section.append(node("h3", "", "Audit history"));
@@ -364,13 +415,16 @@ function renderDetail(report, events){
   const analyze = node("button", "btn primary", report.analysis ? "Run analysis again" : "Analyze with Meta"); analyze.type = "button";
   analyze.disabled = !state.hasKey || report.status === "reviewed" || !["admin","analyst"].includes(state.principal?.role);
   analyze.addEventListener("click", ()=>analyzeReport(report.id));
+  const challenge = node("button", "btn ghost", report.analysis ? "Re-run analysis + challenge (extra API call)" : "Analyze + challenge (extra API call)"); challenge.type="button";
+  challenge.disabled = analyze.disabled;challenge.title="Runs an additional advisory review pass and may incur additional Meta API usage.";
+  challenge.addEventListener("click",()=>analyzeReport(report.id,true));
   const remove = node("button", "btn danger", "Delete case and local history"); remove.type = "button";
   remove.hidden = state.principal?.role !== "admin";
   remove.addEventListener("click", ()=>deleteReport(report.id));
-  topActions.append(analyze, remove); root.append(topActions);
+  topActions.append(analyze, challenge, remove); root.append(topActions);
   if(!state.hasKey){ root.append(node("p", "hint", "Add your personal Meta API key in the account panel to enable live analysis. Built-in examples remain local.")); }
-  appendTextSection(root, "Original report · untrusted text", report.report);
-  if(report.code) appendTextSection(root, "Supplied source · read-only context", report.code, true);
+  appendTextSection(root, "Original report · untrusted text", report.report, false, "source-report");
+  if(report.code) appendTextSection(root, "Supplied source · read-only context", report.code, true, "source-code");
   renderAnalysis(root, report);
   if(report.analysis){ renderReview(root, report); }
   renderHistory(root, events);
@@ -395,11 +449,14 @@ function renderReview(parent, report){
   form.addEventListener("submit", async e=>{e.preventDefault();if(!decision.value){flash("Choose a human decision before saving.","error");return;}save.disabled=true;try{await api(`/api/reports/${encodeURIComponent(report.id)}/review`,{method:"POST",body:JSON.stringify({decision:decision.value,note:note.value})});flash("Human review saved locally.");await refreshAll(report.id);}catch(err){flash(err.message,"error");save.disabled=false;}});
   box.append(form);section.append(box);parent.append(section);
 }
-async function analyzeReport(id){
-  const accepted=window.confirm("This sends the selected report and supplied source snippet to the configured Meta Model API for analysis. It does not contact the reported target or execute the code. Continue?");
+async function analyzeReport(id,challengePass=false){
+  const accepted=window.confirm(challengePass
+    ?"This runs the normal analysis plus a second-pass challenge using another Meta API request. The second pass is advisory, not independent verification, and may incur additional cost. The report/code are sent only to your configured Meta endpoint; no target is contacted and no code is executed. Continue?"
+    :"This sends the selected report and supplied source snippet to the configured Meta Model API for analysis. It does not contact the reported target or execute the code. Continue?");
   if(!accepted)return;
   flash("Sending this case to the configured Meta Model API…");
-  try{const data=await api(`/api/reports/${encodeURIComponent(id)}/analyze`,{method:"POST",body:JSON.stringify({confirm_egress:true})});flash("Analysis complete. Review the recommendation before recording a human disposition.");await refreshAll(id);}catch(e){flash(e.message,"error");}
+  const payload={confirm_egress:true};if(challengePass){payload.challenge_pass=true;payload.confirm_challenge_egress=true;}
+  try{const data=await api(`/api/reports/${encodeURIComponent(id)}/analyze`,{method:"POST",body:JSON.stringify(payload)});flash(challengePass?"Analysis and challenge pass complete. Review both before recording a human disposition.":"Analysis complete. Review the recommendation before recording a human disposition.");await refreshAll(id);}catch(e){flash(e.message,"error");}
 }
 async function deleteReport(id){
   if(!window.confirm("Remove this case and its application-level history from the local database? This cannot be undone through Mizan. Separate backups or database copies are not affected."))return;

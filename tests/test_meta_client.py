@@ -49,6 +49,31 @@ class MetaClientTests(unittest.TestCase):
         self.assertEqual(payload["reasoning_effort"], "medium")
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 120)
 
+    def test_response_metadata_is_opt_in_and_usage_is_allowlisted(self):
+        body = json.dumps({
+            "model": "muse-spark-resolved",
+            "choices": [{"message": {"content": "model answer"}}],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17, "private": "omit"},
+        }).encode("utf-8")
+        env = {"MODEL_API_KEY": "test-key", "META_MODEL": "muse-spark-1.3"}
+        with patch.dict(os.environ, env, clear=True), patch(
+            "meta_client.urllib.request.urlopen", return_value=FakeResponse(body)
+        ):
+            result = meta_client.chat([], return_metadata=True)
+        self.assertEqual(result["content"], "model answer")
+        self.assertEqual(result["model"], "muse-spark-resolved")
+        self.assertEqual(result["usage"], {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17})
+
+    def test_metadata_uses_requested_model_when_provider_omits_it(self):
+        body = json.dumps({"choices": [{"message": {"content": "model answer"}}]}).encode("utf-8")
+        env = {"MODEL_API_KEY": "test-key", "META_MODEL": "muse-spark-1.3"}
+        with patch.dict(os.environ, env, clear=True), patch(
+            "meta_client.urllib.request.urlopen", return_value=FakeResponse(body)
+        ):
+            result = meta_client.chat([], return_metadata=True)
+        self.assertEqual(result["model"], "muse-spark-1.3")
+        self.assertEqual(result["usage"], {})
+
     def test_unavailable_model_falls_back_without_exposing_provider_body(self):
         error = urllib.error.HTTPError(
             "https://api.meta.ai/v1/chat/completions",

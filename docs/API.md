@@ -102,9 +102,17 @@ curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports/CASE_ID/analyze \
   -H 'Content-Type: application/json' -d '{"confirm_egress":true}'
 ```
 
-The selected report and source snippet are sent to the configured `META_API_BASE`. The analysis stores a model recommendation and never sets a human disposition. Saving a report alone is always local-only.
+The selected report and source snippet are sent to the configured `META_API_BASE`. The analysis stores a model recommendation and never sets a human disposition. Saving a report alone is always local-only. The response includes `analysis_meta` with the resolved model identifier (when supplied by the provider), prompt version and SHA-256 of the prompt template, elapsed milliseconds, and allowlisted token counts when available. It does not include the prompt content or API key.
 
-Each analysis includes an `evidence` array. Every item has `source` (`report` or `code`), an exact `quote`, a `relation` (`supports`, `contradicts`, or `context-needed`), a short explanation, and a server-computed `verified` flag. The server checks that the full quote is present in the stated input. If any quote is missing, malformed, or attributed to the wrong source, `citation_integrity` is `unverified` and the suggested decision is downgraded to `need-info`. `missing_context` lists questions that could change the assessment.
+An optional second-pass challenge costs at least one additional model request. It must be explicitly authorized in both the request and the UI:
+
+```json
+{"confirm_egress":true,"challenge_pass":true,"confirm_challenge_egress":true}
+```
+
+`challenge_pass` defaults to `false`; setting it to `true` without `confirm_challenge_egress: true` returns HTTP 400 without calling the model. The second pass is advisory, not independent verification. Its `challenge_pass.status` can be `clear`, `flagged`, `inconclusive`, `invalid-evidence`, `invalid-response`, or `unavailable`. A flagged, inconclusive, or invalid result downgrades the suggested decision to `need-info` and records the primary-pass suggestion separately as `primary_decision`. An unavailable challenge leaves the first-pass suggestion visible and explicitly marks the extra pass unavailable. No status sets a human disposition.
+
+Each analysis includes an `evidence` array. Every item has `source` (`report` or `code`), an exact `quote`, a `relation` (`supports`, `contradicts`, or `context-needed`), a short explanation, and server-computed fields: `verified`, zero-based `start` and `end` character offsets, `match_count`, and `ambiguous`. Offsets refer to the trimmed report/code value analyzed by Mizan; the UI locates the exact quote in the source text and highlights its first occurrence. Repeated quotes remain literal matches but are marked ambiguous. The server checks that the full quote is present in the stated input. If any quote is missing, malformed, or attributed to the wrong source, `citation_integrity` is `unverified` and the suggested decision is downgraded to `need-info`. `missing_context` lists questions that could change the assessment.
 
 Example excerpt:
 
@@ -117,14 +125,25 @@ Example excerpt:
       "quote": "invoice = Invoice.objects.get(id=invoice_id)",
       "relation": "supports",
       "explanation": "The shown lookup is by id, without a user scope in this function.",
-      "verified": true
+      "verified": true,
+      "start": 0,
+      "end": 44,
+      "match_count": 1,
+      "ambiguous": false
     }
   ],
+  "analysis_meta": {
+    "model": "muse-spark-1.3",
+    "prompt_version": "evidence-triage-v1",
+    "prompt_sha256": "...",
+    "elapsed_ms": 4200,
+    "usage": {"prompt_tokens": 1400, "completion_tokens": 420, "total_tokens": 1820}
+  },
   "missing_context": ["Check whether outer middleware scopes this route."]
 }
 ```
 
-`verified` means only that the text matches the supplied source exactly. It does not establish semantic relevance, truth, reachability, or completeness; the reviewer must inspect the surrounding code and make the final decision.
+`verified` means only that the text matches the supplied source exactly. It does not establish semantic relevance, truth, reachability, or completeness; the reviewer must inspect the surrounding code and make the final decision. The optional stateless `POST /api/triage` accepts the same `challenge_pass` and separate confirmation fields for live requests; built-in demo cases make no model calls.
 
 `POST /api/triage` remains available for stateless compatibility. Synthetic canned results can be requested with `{ "demo":"injection", "lang":"en" }`. A live call requires analyst/admin role, the user's own key (or owner-only fallback), and `confirm_egress: true`.
 

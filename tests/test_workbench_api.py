@@ -208,6 +208,37 @@ class WorkbenchAPITests(unittest.TestCase):
         self.assertIn(source, user_message)
         self.assertIn("read-only", user_message.lower())
 
+    def test_challenge_pass_requires_separate_consent_and_downgrades_on_verified_concern(self):
+        case = self.create_case(GOOD_REPORT, GOOD_CODE)
+        primary = json.loads(json.dumps(GOOD))
+        primary["decision"] = "accept"
+        challenge = {
+            "status": "flagged", "summary": "The snippet does not show a user-scoped lookup.",
+            "issues": [{"source": "code", "quote": "Message.objects.get(id=mid)",
+                        "relation": "context-needed", "explanation": "No ownership check is visible here."}],
+        }
+        with patch.object(meta_client, "chat") as chat:
+            status, _, _ = self.request(
+                "/api/reports/%s/analyze" % case["id"],
+                {"confirm_egress": True, "challenge_pass": True}, method="POST",
+            )
+        self.assertEqual(status, 400)
+        chat.assert_not_called()
+
+        with patch.object(meta_client, "chat", side_effect=[json.dumps(primary), json.dumps(challenge)]):
+            status, _, body = self.request(
+                "/api/reports/%s/analyze" % case["id"],
+                {"confirm_egress": True, "challenge_pass": True, "confirm_challenge_egress": True},
+                method="POST",
+            )
+        self.assertEqual(status, 200)
+        analysis = json.loads(body)["report"]["analysis"]
+        self.assertEqual(analysis["primary_decision"], "accept")
+        self.assertEqual(analysis["decision"], "need-info")
+        self.assertEqual(analysis["challenge_pass"]["status"], "flagged")
+        self.assertEqual(analysis["challenge_pass"]["citation_integrity"], "verified")
+        self.assertIsNone(json.loads(body)["report"]["review_decision"])
+
     def test_fabricated_model_quote_is_visible_but_downgrades_decision(self):
         case = self.create_case(GOOD_REPORT, GOOD_CODE)
         fabricated = json.loads(json.dumps(GOOD))

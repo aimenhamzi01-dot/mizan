@@ -15,6 +15,9 @@ Built for the **Meta Global AI Developer Hackathon 2026**, Indie Developer Track
 - Each researcher can store a personal Meta API key; it is encrypted at rest with AES-GCM using an installation key. No researcher key is shared by Mizan.
 - Explicit confirmation before any case content is sent to the configured Meta-compatible endpoint.
 - Evidence trail for each analysis: report/code excerpts are shown with source labels, and the server checks each quote is an exact substring of the stated input. A failed quote check downgrades the recommendation to `need-info`.
+- Verified excerpts include server-computed character ranges and occurrence counts, so reviewers can jump to the quoted source and spot repeated/ambiguous matches.
+- Optional second-pass challenge asks Muse Spark to identify concrete contradictions, assumptions, or missing context. It requires a separate confirmation, is advisory rather than independent verification, and can downgrade a recommendation to `need-info`.
+- Synthetic bilingual evaluation harness reports recommendation, false-accept, code-assessment, injection-detection, and citation-integrity metrics without including case text in its output.
 - Searchable queue, aggregate metrics, audit events, human dispositions separate from model recommendations, and local deletion.
 - Synthetic examples; English interface with English/Arabic report-analysis language selection.
 
@@ -74,6 +77,7 @@ All members of a workspace can read that workspace's cases; workspace roles are 
 - Personal Meta API keys are encrypted in SQLite with AES-GCM. The 256-bit `MIZAN_ENCRYPTION_KEY` remains in `.env`; back it up securely with the database. If lost, saved personal API keys cannot be decrypted. Do not regenerate or rotate it casually.
 - Each researcher supplies and pays for their own Meta API usage. The optional `MODEL_API_KEY` environment variable is a legacy fallback for the installation owner only; ordinary users use their encrypted personal key.
 - A live analysis sends the selected case report and code to `META_API_BASE` only after explicit UI consent and server-side `confirm_egress: true`. Use only a trusted provider endpoint.
+- The optional challenge mode makes an additional Meta API request with the same case content; it is off by default, separately confirmed, and may incur extra provider charges.
 - Tokens are bearer secrets. They are not passwords, are not stored in browser storage, and have no automatic expiry. Admins can revoke or rotate individual tokens.
 
 ## Configuration
@@ -108,7 +112,7 @@ All `/api/*` routes require a valid `Authorization: Bearer <token>` header. The 
 | `POST /api/admin/users/{id}/rotate-token` / `DELETE /api/admin/users/{id}` | Rotate or revoke a user token |
 | `PUT/DELETE /api/me/model-key` | Save or remove the current user's encrypted Meta key |
 | `GET/POST /api/reports` | List cases / create a local case |
-| `POST /api/reports/{id}/analyze` | Explicit live analysis using the current user's key |
+| `POST /api/reports/{id}/analyze` | Explicit live analysis; optional separately confirmed second-pass challenge |
 | `POST /api/reports/{id}/review` | Record a human disposition |
 | `GET /api/reports/{id}/history` | Read local audit events |
 | `GET /api/metrics` | Workspace-scoped counts only |
@@ -119,12 +123,15 @@ All `/api/*` routes require a valid `Authorization: Bearer <token>` header. The 
 
 Mizan is a self-hosted prototype, not a vulnerability validator or a production SaaS. Evidence citations are checked for exact text presence, not semantic correctness. It does not implement password login, MFA, session cookies, automatic token expiry, database encryption, automatic retention, or TLS termination. Review the deployment and privacy boundaries in [SECURITY.md](SECURITY.md) before enabling private team access.
 
-## Tests and CI
+## Tests, evaluation, and CI
 
 ```bash
 python3 -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
+python scripts/evaluate.py
 ```
+
+The evaluation command validates the bundled synthetic bilingual fixtures locally and makes **zero model calls** by default. To run a live, cost-incurring evaluation, set your own authorized key and explicitly run `python scripts/evaluate.py --live --confirm-egress`; only bundled synthetic cases are sent. Add `--include-challenge --confirm-extra-calls` only if you also authorize the additional model requests. The output omits report/code text and clearly labels the results as a small regression set, not production accuracy.
 
 GitHub Actions runs the offline Python suite, builds the container, and smoke-tests its health endpoint and authenticated API. Provider calls are mocked; CI uses only test values and never contacts vulnerability targets.
 
@@ -138,6 +145,7 @@ GitHub Actions runs the offline Python suite, builds the container, and smoke-te
 | `review_store.py` | SQLite migrations, scoped cases, events, metrics, and deletion |
 | `meta_client.py` | Meta-compatible model API client |
 | `triage.py`, `prompts.py` | Safe triage pipeline, prompt boundary, normalization, and guardrails |
+| `scripts/evaluate.py`, `tests/fixtures/evaluation_cases.json` | Opt-in live evaluation over synthetic bilingual cases; offline fixture validation by default |
 | `static/index.html` | Researcher workbench, profile key settings, and workspace admin panel |
 | `scripts/bootstrap.py`, `scripts/run.py` | Private initial setup and Compose startup |
 | `Dockerfile`, `compose.yaml` | Hardened self-hosted container and persistent SQLite volume |

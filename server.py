@@ -390,12 +390,19 @@ class Handler(BaseHTTPRequestHandler):
                 if payload.get("confirm_egress") is not True:
                     self._send(400, {"error": "Explicit model-egress confirmation is required."})
                     return
+                challenge_pass = payload.get("challenge_pass", False)
+                if not isinstance(challenge_pass, bool):
+                    self._send(400, {"error": "challenge_pass must be a boolean."})
+                    return
+                if challenge_pass and payload.get("confirm_challenge_egress") is not True:
+                    self._send(400, {"error": "Explicit confirmation for the additional challenge call is required."})
+                    return
                 report, code, language = self._report_parts(payload)
                 api_key = self._get_user_model_key()
                 if not api_key:
                     self._send(409, {"error": "Add your own encrypted Meta API key in your account profile before analysis."})
                     return
-                self._send(200, triage.triage(report, code, language, api_key=api_key))
+                self._send(200, triage.triage(report, code, language, api_key=api_key, challenge_pass=challenge_pass))
                 return
             if path == "/api/reports":
                 if not self._require_roles(ANALYZE_ROLES):
@@ -412,6 +419,13 @@ class Handler(BaseHTTPRequestHandler):
                 if payload.get("confirm_egress") is not True:
                     self._send(400, {"error": "Explicit model-egress confirmation is required."})
                     return
+                challenge_pass = payload.get("challenge_pass", False)
+                if not isinstance(challenge_pass, bool):
+                    self._send(400, {"error": "challenge_pass must be a boolean."})
+                    return
+                if challenge_pass and payload.get("confirm_challenge_egress") is not True:
+                    self._send(400, {"error": "Explicit confirmation for the additional challenge call is required."})
+                    return
                 saved = review_store.get_report(report_id, workspace_id=scope)
                 if saved["status"] == "reviewed":
                     raise review_store.InvalidState("A reviewed report cannot be re-analyzed; create a new report instead.")
@@ -419,7 +433,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not api_key:
                     self._send(409, {"error": "Add your own encrypted Meta API key in your account profile before analysis."})
                     return
-                analysis = triage.triage(saved["report"], saved["code"], saved["language"], api_key=api_key)
+                analysis = triage.triage(
+                    saved["report"], saved["code"], saved["language"],
+                    api_key=api_key, challenge_pass=challenge_pass,
+                )
                 updated = review_store.save_analysis(report_id, analysis, actor=username, workspace_id=scope, actor_user_id=actor_id)
                 self._send(200, {"report": updated})
                 return

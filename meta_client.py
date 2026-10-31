@@ -10,6 +10,7 @@ import urllib.request
 DEFAULT_BASE = "https://api.meta.ai/v1"
 DEFAULT_MODELS = "muse-spark-1.3,muse-spark-1.1"
 MAX_RESPONSE_BYTES = 1_000_000
+_ALLOWED_USAGE_KEYS = {"prompt_tokens", "completion_tokens", "total_tokens"}
 
 
 class MetaAPIError(Exception):
@@ -42,14 +43,24 @@ def _content_to_text(content):
     return ""
 
 
-def chat(messages, *, api_key=None, max_tokens=3000, temperature=0.2, timeout=120):
-    """Send a chat completion. Tries each model in META_MODEL until one is accepted."""
+def _safe_usage(value):
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: value[key]
+        for key in _ALLOWED_USAGE_KEYS
+        if type(value.get(key)) is int and 0 <= value[key] <= 100_000_000
+    }
+
+
+def chat(messages, *, api_key=None, max_tokens=3000, temperature=0.2, timeout=120,
+         return_metadata=False):
+    """Send a chat completion; optionally include response model and token usage."""
     configured_key, base, models = get_config()
     key = api_key or configured_key
     if not key:
         raise MetaAPIError("MODEL_API_KEY is not set. Add it to your .env file.", 401)
 
-    last_error = None
     for model in models:
         payload = {
             "model": model,
@@ -76,7 +87,16 @@ def chat(messages, *, api_key=None, max_tokens=3000, temperature=0.2, timeout=12
             text = _content_to_text(data["choices"][0]["message"].get("content"))
             if not text.strip():
                 raise MetaAPIError("The model returned an empty answer. Try again.", 502)
-            return text
+            if not return_metadata:
+                return text
+            response_model = data.get("model")
+            if not isinstance(response_model, str) or not response_model.strip():
+                response_model = model
+            return {
+                "content": text,
+                "model": response_model[:120],
+                "usage": _safe_usage(data.get("usage")),
+            }
         except urllib.error.HTTPError as e:
             body = e.read(4096).decode("utf-8", errors="replace")
             if e.code in (400, 404) and "model" in body.lower():
@@ -86,4 +106,4 @@ def chat(messages, *, api_key=None, max_tokens=3000, temperature=0.2, timeout=12
             raise MetaAPIError("Could not reach the configured Meta API endpoint.", 502)
         except (KeyError, IndexError, json.JSONDecodeError, UnicodeDecodeError, TypeError):
             raise MetaAPIError("Unexpected response format from the API.", 502)
-    raise last_error or MetaAPIError("No model available.", 502)
+    raise MetaAPIError("No model available.", 502)
