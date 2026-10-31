@@ -8,7 +8,7 @@ Built for the **Meta Global AI Developer Hackathon 2026**, Indie Developer Track
 
 ## Demo
 
-[Watch the 60-second Mizan demo (MP4)](assets/Mizan-Hackathon-Demo.mp4) · [Watch the submitted demo on YouTube](https://youtu.be/uUCqdQIJf40)
+[Watch the 60-second Mizan demo (MP4)](assets/Mizan-Hackathon-Demo.mp4) · [Watch the submitted demo on YouTube](https://youtu.be/RT6BPgxCHZ4)
 
 The bundled demo uses synthetic vulnerability-report data and demonstrates the human-led triage workflow.
 
