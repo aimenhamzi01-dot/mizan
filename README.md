@@ -12,9 +12,9 @@ A self-hosted workbench that helps security researchers review vulnerability rep
 
 **Built for the [Meta Global AI Developer Hackathon 2026](https://dev.meta.ai/events/global-hackathon)** · Indie Developer Track · *Build for Your World*
 
-<a href="https://youtu.be/RT6BPgxCHZ4"><img src="assets/mizan-demo-preview.png" alt="Mizan evidence trail showing source-labelled report and code excerpts, missing context, and the human disposition panel" width="920"></a>
+<a href="https://youtu.be/HWmw2o5sIv4"><img src="assets/mizan-demo-preview.png" alt="Mizan evidence trail showing source-labelled report and code excerpts, missing context, and the human disposition panel" width="920"></a>
 
-[▶ Watch the submitted demo](https://youtu.be/RT6BPgxCHZ4) · [Download the 60-second MP4](assets/Mizan-Hackathon-Demo.mp4) · [Explore the source](https://github.com/aimenhamzi01-dot/mizan)
+[▶ Watch the 3-minute live demo](https://youtu.be/HWmw2o5sIv4) · [Download the 60-second preview MP4](assets/Mizan-Hackathon-Demo.mp4) · [Explore the source](https://github.com/aimenhamzi01-dot/mizan)
 
 </div>
 
