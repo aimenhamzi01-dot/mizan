@@ -22,6 +22,16 @@ A self-hosted workbench that helps security researchers review vulnerability rep
 
 Security teams spend time sorting actionable vulnerability reports from scanner output, incomplete claims, and AI-generated noise. Reports can also contain prompt-injection text aimed at manipulating an AI reviewer. Mizan gives researchers a structured place to assess those reports while keeping the model advisory and the final disposition explicitly human-owned.
 
+## Why I built Mizan
+
+I'm Aimen Hamzi, a cybersecurity engineer and vulnerability researcher who submits reports to programs such as Google Bug Hunters, Apple Security Bounty, and Meta Bug Bounty, as well as programs hosted on HackerOne and Bugcrowd. Since March 2026, my day-to-day experience has included longer triage waits and a growing share of low-signal submissions—scanner output, incomplete reports, and AI-generated noise. When these reports accumulate, they can consume reviewer attention needed for well-supported findings. This is my firsthand practitioner perspective, not an audited or industry-wide measurement.
+
+One concrete example is Google's October 1, 2026 notice: it temporarily paused product-vulnerability submissions to OSS VRP after a rise in automated submissions, the vast majority of which Google said were invalid. Supply-chain and already-submitted reports were unaffected; this was a pause of one report category, not a closure of the entire program. [Google's official notice](https://x.com/GoogleVRP/status/2105689195180179605) · [The Hacker News coverage](https://thehackernews.com/2026/10/google-pauses-oss-product-bug-bounty.html).
+
+My name appears on the Google Bug Hunters leaderboard, and Apple has acknowledged my security research. That experience led me to build Mizan as a practical counterweight: not an automated decision-maker, but an evidence-led workbench that helps reviewers inspect a claim, trace quoted excerpts to supplied material, identify missing context, and record a human decision.
+
+*Mizan* means “balance” in Arabic. The name reflects the goal: balance the speed of AI assistance with evidence, researcher judgment, and accountability.
+
 ## A quick judge walkthrough
 
 You can explore the workbench without a Meta API key or a model call:
