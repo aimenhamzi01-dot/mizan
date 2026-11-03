@@ -6,9 +6,11 @@ import time
 
 import meta_client
 from prompts import (
+    CHALLENGE_RESPONSE_FORMAT,
     CHALLENGE_SYSTEM,
     CHALLENGE_USER,
     CODE_BLOCK_TEMPLATE,
+    TRIAGE_RESPONSE_FORMAT,
     TRIAGE_SYSTEM,
     TRIAGE_USER,
 )
@@ -16,8 +18,8 @@ from prompts import (
 LANG_NAMES = {"ar": "Arabic", "en": "English"}
 MAX_REPORT = 20000
 MAX_CODE = 40000
-TRIAGE_PROMPT_VERSION = "evidence-triage-v1"
-CHALLENGE_PROMPT_VERSION = "second-pass-challenge-v1"
+TRIAGE_PROMPT_VERSION = "evidence-triage-v2-meta-json-schema"
+CHALLENGE_PROMPT_VERSION = "cross-version-challenge-v2-meta-json-schema"
 
 NOISE = {"specific", "generic", "scanner-dump"}
 VERIFY = {"supported", "unverifiable", "contradicted"}
@@ -187,14 +189,22 @@ def _response_parts(response):
     if isinstance(response, dict) and isinstance(response.get("content"), str):
         model = response.get("model") if isinstance(response.get("model"), str) else "unknown"
         usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
-        return response["content"], model[:120], usage
+        reasoning_effort = response.get("reasoning_effort")
+        output_format = response.get("output_format")
+        return response["content"], model[:120], usage, reasoning_effort, output_format
     if isinstance(response, str):
-        return response, "unknown", {}
+        return response, "unknown", {}, "model-default", "unspecified"
     raise ValueError("unexpected model response")
 
 
-def _prompt_metadata(system_prompt, user_template, version, model, elapsed_ms, usage):
-    prompt_hash = hashlib.sha256((system_prompt + "\0" + user_template).encode("utf-8")).hexdigest()
+def _prompt_metadata(
+    system_prompt, user_template, version, model, elapsed_ms, usage,
+    *, response_format=None, reasoning_effort=None, output_format=None,
+):
+    hash_material = system_prompt + "\0" + user_template
+    if response_format is not None:
+        hash_material += "\0" + json.dumps(response_format, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    prompt_hash = hashlib.sha256(hash_material.encode("utf-8")).hexdigest()
     safe_usage = {
         key: value for key, value in usage.items()
         if key in {"prompt_tokens", "completion_tokens", "total_tokens"}
@@ -206,6 +216,8 @@ def _prompt_metadata(system_prompt, user_template, version, model, elapsed_ms, u
         "prompt_sha256": prompt_hash,
         "elapsed_ms": max(0, min(int(elapsed_ms), 600_000)),
         "usage": safe_usage,
+        "output_format": output_format or ("json_schema" if response_format is not None else "unspecified"),
+        "reasoning_effort": reasoning_effort or "model-default",
     }
 
 
@@ -232,19 +244,35 @@ def _challenge_messages(report, code, analysis, language):
     )
     system_msg = CHALLENGE_SYSTEM.replace("{language}", language)
     return [
-        {"role": "system", "content": system_msg},
+        {"role": "developer", "content": system_msg},
         {"role": "user", "content": user_msg},
     ]
 
 
-def _run_challenge(report, code, language, analysis, api_key):
+def _run_challenge(report, code, language, analysis, api_key, primary_model="unknown"):
     messages = _challenge_messages(report, code, analysis, language)
     started = time.monotonic()
+    challenge_models = meta_client.get_challenge_models(primary_model)
+    if not challenge_models:
+        return {
+            "status": "unavailable",
+            "summary": "No configured Muse Spark version differs from the primary model; this optional challenge was not run.",
+            "issues": [],
+            "citation_integrity": "not-applicable",
+            "analysis_meta": _prompt_metadata(
+                CHALLENGE_SYSTEM.replace("{language}", language), CHALLENGE_USER,
+                CHALLENGE_PROMPT_VERSION, "not-run", 0, {},
+                response_format=CHALLENGE_RESPONSE_FORMAT, reasoning_effort="not-run", output_format="not-run",
+            ),
+        }
     try:
         response = meta_client.chat(
-            messages, api_key=api_key, max_tokens=1800, temperature=0.1, return_metadata=True
+            messages, api_key=api_key, max_completion_tokens=4000, return_metadata=True,
+            response_format=CHALLENGE_RESPONSE_FORMAT, model_candidates=challenge_models,
         )
-        reply, model, usage = _response_parts(response)
+        reply, model, usage, reasoning_effort, output_format = _response_parts(response)
+        if model != "unknown" and primary_model != "unknown" and model.casefold() == primary_model.casefold():
+            raise ValueError("challenge resolved to the primary model")
         data = extract_json(reply)
         if not isinstance(data, dict):
             raise ValueError("challenge result was not an object")
@@ -258,6 +286,8 @@ def _run_challenge(report, code, language, analysis, api_key):
                 "analysis_meta": _prompt_metadata(
                     CHALLENGE_SYSTEM.replace("{language}", language), CHALLENGE_USER,
                     CHALLENGE_PROMPT_VERSION, model, (time.monotonic() - started) * 1000, usage,
+                    response_format=CHALLENGE_RESPONSE_FORMAT,
+                    reasoning_effort=reasoning_effort, output_format=output_format,
                 ),
             }
         if status == "clear" and raw_issues:
@@ -280,6 +310,8 @@ def _run_challenge(report, code, language, analysis, api_key):
             "analysis_meta": _prompt_metadata(
                 CHALLENGE_SYSTEM.replace("{language}", language), CHALLENGE_USER,
                 CHALLENGE_PROMPT_VERSION, model, (time.monotonic() - started) * 1000, usage,
+                response_format=CHALLENGE_RESPONSE_FORMAT,
+                reasoning_effort=reasoning_effort, output_format=output_format,
             ),
         }
     except Exception:
@@ -292,6 +324,7 @@ def _run_challenge(report, code, language, analysis, api_key):
             "analysis_meta": _prompt_metadata(
                 CHALLENGE_SYSTEM.replace("{language}", language), CHALLENGE_USER,
                 CHALLENGE_PROMPT_VERSION, "unknown", (time.monotonic() - started) * 1000, {},
+                response_format=CHALLENGE_RESPONSE_FORMAT, reasoning_effort="unavailable", output_format="not-run",
             ),
         }
 
@@ -324,28 +357,32 @@ def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False):
     )
     system_msg = TRIAGE_SYSTEM.replace("{language}", language)
     messages = [
-        {"role": "system", "content": system_msg},
+        {"role": "developer", "content": system_msg},
         {"role": "user", "content": user_msg},
     ]
 
     last_err = None
     final_model, usage_total = "unknown", {}
+    final_reasoning_effort, final_output_format = "model-default", "unspecified"
     started = time.monotonic()
     for _ in range(2):
         response = meta_client.chat(
-            messages, api_key=api_key, max_tokens=3500, temperature=0.1, return_metadata=True
+            messages, api_key=api_key, max_completion_tokens=6500, return_metadata=True,
+            response_format=TRIAGE_RESPONSE_FORMAT,
         )
         reply = None
         try:
-            reply, final_model, call_usage = _response_parts(response)
+            reply, final_model, call_usage, final_reasoning_effort, final_output_format = _response_parts(response)
             _add_usage(usage_total, call_usage)
             normalized = normalize(extract_json(reply), report, code)
             normalized["analysis_meta"] = _prompt_metadata(
                 system_msg, TRIAGE_USER, TRIAGE_PROMPT_VERSION, final_model,
                 (time.monotonic() - started) * 1000, usage_total,
+                response_format=TRIAGE_RESPONSE_FORMAT,
+                reasoning_effort=final_reasoning_effort, output_format=final_output_format,
             )
             if challenge_pass:
-                challenge = _run_challenge(report, code, language, normalized, api_key)
+                challenge = _run_challenge(report, code, language, normalized, api_key, final_model)
                 normalized["challenge_pass"] = challenge
                 if challenge["status"] in {"flagged", "inconclusive", "invalid-evidence", "invalid-response"}:
                     normalized["primary_decision"] = normalized["decision"]

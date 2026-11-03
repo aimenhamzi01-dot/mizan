@@ -32,7 +32,9 @@ Mizan is a self-hosted team workbench. One operator-controlled installation can 
 
 ## AI and review boundaries
 
-Submitted source and reproduction steps are stored as text only. Mizan never executes submitted code, runs exploits, probes a target, or initiates target connectivity. The triage layer keeps report/code separate from system instructions, JSON-quotes untrusted values, checks the expected response schema, and retains hard guardrails that prevent acceptance when the response is incomplete, supplied code contradicts a claim, the report is classified as scanner noise, or source quotes cannot be verified literally.
+Submitted source and reproduction steps are stored as text only. Mizan never executes submitted code, runs exploits, probes a target, or initiates target connectivity. The triage layer keeps report/code separate from developer instructions, JSON-quotes untrusted values, checks the expected response schema, and retains hard guardrails that prevent acceptance when the response is incomplete, supplied code contradicts a claim, the report is classified as scanner noise, or source quotes cannot be verified literally.
+
+Mizan requests Meta's strict JSON Schema output; when honored by the configured provider, it constrains response shape, not factual correctness. The server continues to validate required fields and each quote independently; a literal quote match does not prove semantic relevance, truth, reachability, or completeness. Muse Spark high reasoning is the default and can increase provider usage; users see the configured level and usage metadata. The optional challenge re-sends the case and first analysis to a different Muse Spark version when available, but remains advisory and is not independent verification. It requires explicit additional egress consent and may incur additional charges.
 
 These controls reduce risk but do not make model output infallible. The model cannot infer omitted route decorators, middleware, deployment settings, or other authorization layers from a partial snippet. Every final disposition remains a human responsibility. Mizan does not close tickets, contact programs, or message reporters.
 

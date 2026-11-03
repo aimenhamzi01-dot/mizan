@@ -37,10 +37,11 @@ class MetaClientTests(unittest.TestCase):
             "META_REASONING_EFFORT": "medium",
         }
         messages = [{"role": "system", "content": "test system"}, {"role": "user", "content": "test data"}]
+        response_format = {"type": "json_schema", "json_schema": {"name": "test", "strict": True, "schema": {"type": "object"}}}
         with patch.dict(os.environ, env, clear=True), patch(
             "meta_client._open_request", return_value=response_text("model answer")
         ) as opener:
-            self.assertEqual(meta_client.chat(messages), "model answer")
+            self.assertEqual(meta_client.chat(messages, response_format=response_format), "model answer")
         request = opener.call_args.args[0]
         payload = json.loads(request.data.decode("utf-8"))
         self.assertEqual(request.full_url, "https://api.meta.ai/v1/chat/completions")
@@ -48,8 +49,53 @@ class MetaClientTests(unittest.TestCase):
         self.assertEqual(request.get_method(), "POST")
         self.assertEqual(payload["model"], "muse-spark-1.3")
         self.assertEqual(payload["messages"], messages)
+        self.assertEqual(payload["response_format"], response_format)
+        self.assertEqual(payload["max_completion_tokens"], 3000)
         self.assertEqual(payload["reasoning_effort"], "medium")
+        self.assertNotIn("temperature", payload)
         self.assertEqual(opener.call_args.kwargs["timeout"], 120)
+
+    def test_high_reasoning_is_the_default_and_can_be_overridden_per_installation(self):
+        env = {"MODEL_API_KEY": "test-key", "META_MODEL": "muse-spark-1.3"}
+        with patch.dict(os.environ, env, clear=True), patch(
+            "meta_client._open_request", return_value=response_text("answer")
+        ) as opener:
+            result = meta_client.chat([], return_metadata=True)
+        payload = json.loads(opener.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(payload["reasoning_effort"], "high")
+        self.assertEqual(result["reasoning_effort"], "high")
+
+        env["META_REASONING_EFFORT"] = "medium"
+        with patch.dict(os.environ, env, clear=True), patch(
+            "meta_client._open_request", return_value=response_text("answer")
+        ) as opener:
+            meta_client.chat([])
+        self.assertEqual(json.loads(opener.call_args.args[0].data.decode("utf-8"))["reasoning_effort"], "medium")
+
+    def test_challenge_models_exclude_primary_and_deduplicate(self):
+        env = {"META_CHALLENGE_MODELS": "muse-spark-1.2,muse-spark-1.1,muse-spark-1.1"}
+        with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(meta_client.get_challenge_models("muse-spark-1.2"), ["muse-spark-1.1"])
+            self.assertEqual(meta_client.get_challenge_models("muse-spark-1.3"), ["muse-spark-1.2", "muse-spark-1.1"])
+
+    def test_chat_uses_filtered_challenge_candidates_in_request(self):
+        env = {"MODEL_API_KEY": "test-key", "META_MODEL": "muse-spark-1.3"}
+        challenge_models = ["muse-spark-1.2", "muse-spark-1.1"]
+        with patch.dict(os.environ, env, clear=True), patch(
+            "meta_client._open_request", return_value=response_text("answer")
+        ) as opener:
+            meta_client.chat([], model_candidates=challenge_models)
+        payload = json.loads(opener.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(payload["model"], "muse-spark-1.2")
+        self.assertEqual(payload["reasoning_effort"], "high")
+
+    def test_max_reasoning_is_restricted_to_muse_spark_1_3(self):
+        with patch.dict(os.environ, {"META_REASONING_EFFORT": "max"}, clear=True):
+            with self.assertRaises(meta_client.MetaAPIError) as caught:
+                meta_client.get_reasoning_effort("muse-spark-1.2")
+        self.assertEqual(caught.exception.status, 400)
+        with patch.dict(os.environ, {"META_REASONING_EFFORT": "max"}, clear=True):
+            self.assertEqual(meta_client.get_reasoning_effort("muse-spark-1.3"), "max")
 
     def test_response_metadata_is_opt_in_and_usage_is_allowlisted(self):
         body = json.dumps({

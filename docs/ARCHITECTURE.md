@@ -11,8 +11,8 @@ Mizan is a self-hosted, human-led security-report triage workbench. A single ope
 - **Identity store (`auth_store.py`)** — creates workspaces, users, high-entropy tokens, role assignments, revocation, and token rotation. SQLite stores only SHA-256 token digests; bearer tokens are returned once.
 - **Case store (`review_store.py`)** — versioned SQLite schema. Each report maps to one workspace. Existing records migrate into `default`. Event history records authenticated actor ids and names. Queries for non-owner principals include workspace scope.
 - **Secret store (`secret_store.py`)** — encrypts each user's Meta API key with AES-256-GCM and user-id associated data. The master 32-byte key is supplied through private `MIZAN_ENCRYPTION_KEY`, never through the browser.
-- **Triage (`triage.py`, `prompts.py`)** — issues the primary model call only after explicit user action and server confirmation. User report/code remain separate from system instructions, are JSON-quoted, and are normalized through hard acceptance guardrails. The optional challenge is a second advisory model pass requiring separate confirmation; its source quotations are also checked server-side.
-- **Model client (`meta_client.py`)** — sends messages to the configured Meta-compatible endpoint using the authenticated user's key and can return allowlisted model/token-usage metadata. Only the installation owner may use the legacy environment-key fallback.
+- **Triage (`triage.py`, `prompts.py`)** — issues the primary model call only after explicit user action and server confirmation. User report/code remain separate from developer instructions, are JSON-quoted, and use strict Meta JSON Schema output before local normalization and hard acceptance guardrails. The optional challenge is a separately confirmed advisory pass routed to a different configured Muse Spark version when available; its source quotations are also checked server-side.
+- **Model client (`meta_client.py`)** — sends messages to the configured Meta-compatible endpoint using the authenticated user's key, Muse Spark's default temperature, configurable reasoning effort (high by default), strict output schemas, model fallbacks, and allowlisted model/token-usage metadata. Only the installation owner may use the legacy environment-key fallback.
 - **Container (`Dockerfile`, `compose.yaml`)** — runs non-root with a read-only root filesystem, dropped capabilities, persistent SQLite volume, and a loopback-only host port by default.
 - **Bootstrap (`scripts/bootstrap.py`)** — creates a private owner token, AES encryption key, and unique Compose project name. It never prints the encryption key and refuses to silently replace a previously initialized missing key.
 
@@ -52,12 +52,12 @@ sequenceDiagram
     API->>DB: Read case within principal's workspace
     API->>Keys: Decrypt only this user's key
     API->>Model: Send selected report/code
-    Model-->>API: Structured advisory recommendation
+    Model-->>API: Strict JSON Schema advisory + model/usage metadata
     API->>DB: Save analysis event with actor identity
     opt Researcher separately confirms challenge pass
         UI->>API: challenge_pass=true and confirm_challenge_egress=true
-        API->>Model: Send report/code and first analysis for critique
-        Model-->>API: Advisory challenge with quoted concerns
+        API->>Model: Send report/code and first analysis to a different configured Muse Spark version
+        Model-->>API: Strict JSON Schema advisory challenge with quoted concerns
         API->>API: Verify challenge quotes against their stated source
         API->>DB: Save challenge status and model/prompt metadata
     end
@@ -68,7 +68,7 @@ sequenceDiagram
 
 No target-system component exists. The only application egress is the configured model endpoint, and it occurs only after explicit confirmation.
 
-For each verified quote, the server computes the first source offset, end offset, and occurrence count. The UI can jump to and highlight the first match; repeated excerpts are visibly marked ambiguous. This establishes literal presence only, not semantic relevance or truth. Prompt hashes identify instruction-template versions without storing prompt contents in metadata. The optional second pass uses the same configured endpoint and is not independent verification; a concern, inconclusive result, or invalid challenge citation downgrades the model suggestion to `need-info`, never the human disposition.
+For each verified quote, the server computes the first source offset, end offset, and occurrence count. The UI can jump to and highlight the first match; repeated excerpts are visibly marked ambiguous. This establishes literal presence only, not semantic relevance or truth. Prompt hashes include the JSON Schema contract and identify instruction/schema versions without storing prompt contents in metadata. The optional second pass uses the same configured endpoint but a different model version where possible; it remains within the Muse Spark family and is not independent verification. A concern, inconclusive result, or invalid challenge citation downgrades the model suggestion to `need-info`, never the human disposition.
 
 ## Case state machine
 

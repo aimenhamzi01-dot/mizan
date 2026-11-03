@@ -41,7 +41,9 @@ python scripts/evaluate.py --live --confirm-egress --limit 1
 
 Omit `--limit 1` to run the full fixture set. Each case makes at least one model request and may incur provider charges. Results contain case IDs, decisions, model/prompt metadata, and aggregate metrics, but not report or code text. Use `--output evaluation-results.json` to save the output locally; protect and delete it according to your research data policy.
 
-The optional challenge pass requires explicit authorization for its additional requests:
+The default live profile uses strict JSON Schema output and high reasoning on the latest available primary Muse Spark model. To compare reasoning budgets, repeat the same synthetic run with `META_REASONING_EFFORT=medium`; keep the model order, fixture set, prompt/schema version, and labels fixed, and compare decisions, evidence integrity, token usage, and latency. Each repeat is a new paid API run. Such a small fixture set is exploratory and cannot establish general model accuracy.
+
+The optional cross-version challenge requires explicit authorization for its additional requests. It tries a configured Muse Spark version different from the primary model when available; it is still the same model family and is not independent verification.
 
 ```bash
 python scripts/evaluate.py --live --confirm-egress --include-challenge --confirm-extra-calls --limit 1

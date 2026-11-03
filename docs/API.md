@@ -102,15 +102,17 @@ curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports/CASE_ID/analyze \
   -H 'Content-Type: application/json' -d '{"confirm_egress":true}'
 ```
 
-The selected report and source snippet are sent to the configured `META_API_BASE`. Remote endpoints must use HTTPS; redirects are rejected, so configure the final trusted endpoint URL directly. The analysis stores a model recommendation and never sets a human disposition. Saving a report alone is always local-only. The response includes `analysis_meta` with the resolved model identifier (when supplied by the provider), prompt version and SHA-256 of the prompt template, elapsed milliseconds, and allowlisted token counts when available. It does not include the prompt content or API key.
+The selected report and source snippet are sent to the configured `META_API_BASE`. Remote endpoints must use HTTPS; redirects are rejected, so configure the final trusted endpoint URL directly. The analysis stores a model recommendation and never sets a human disposition. Saving a report alone is always local-only. Mizan requests a strict Meta `response_format` JSON Schema and defaults to `reasoning_effort: high`; the operator may lower it using `META_REASONING_EFFORT`. Higher reasoning can increase latency, output tokens, and provider charges. Mizan leaves temperature unset to use Meta's Muse Spark default. The response includes `analysis_meta` with the resolved model identifier (when supplied by the provider), prompt/schema version and SHA-256 fingerprint, requested output format, reasoning effort, elapsed milliseconds, and allowlisted token counts when available. It does not include the prompt content or API key.
 
-An optional second-pass challenge costs at least one additional model request. It must be explicitly authorized in both the request and the UI:
+An optional cross-version challenge costs at least one additional model request. It must be explicitly authorized in both the request and the UI. By default it tries `muse-spark-1.2` and then `muse-spark-1.1`, excluding the resolved primary model; configure `META_CHALLENGE_MODELS` to change that order. If no different candidate is configured or available, the challenge is marked unavailable rather than silently repeating the primary model. Different Muse Spark versions are still the same model family, so this pass is advisory—not independent verification. The report, source snippet, and first analysis are sent again to the configured endpoint, and may incur additional token use and charges:
 
 ```json
 {"confirm_egress":true,"challenge_pass":true,"confirm_challenge_egress":true}
 ```
 
 `challenge_pass` defaults to `false`; setting it to `true` without `confirm_challenge_egress: true` returns HTTP 400 without calling the model. The second pass is advisory, not independent verification. Its `challenge_pass.status` can be `clear`, `flagged`, `inconclusive`, `invalid-evidence`, `invalid-response`, or `unavailable`. A flagged, inconclusive, or invalid result downgrades the suggested decision to `need-info` and records the primary-pass suggestion separately as `primary_decision`. An unavailable challenge leaves the first-pass suggestion visible and explicitly marks the extra pass unavailable. No status sets a human disposition.
+
+The default primary model order is `muse-spark-1.3,muse-spark-1.2,muse-spark-1.1`. `META_REASONING_EFFORT` accepts `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; `max` is limited to Muse Spark 1.3. When unset, Mizan uses `high`. Because the optional challenge deliberately selects a different version, `max` may make that pass unavailable; use `high` to enable both passes across the default model order. The final selected model and reasoning setting are recorded separately for each pass.
 
 Each analysis includes an `evidence` array. Every item has `source` (`report` or `code`), an exact `quote`, a `relation` (`supports`, `contradicts`, or `context-needed`), a short explanation, and server-computed fields: `verified`, zero-based `start` and `end` character offsets, `match_count`, and `ambiguous`. Offsets refer to the trimmed report/code value analyzed by Mizan; the UI locates the exact quote in the source text and highlights its first occurrence. Repeated quotes remain literal matches but are marked ambiguous. The server checks that the full quote is present in the stated input. If any quote is missing, malformed, or attributed to the wrong source, `citation_integrity` is `unverified` and the suggested decision is downgraded to `need-info`. `missing_context` lists questions that could change the assessment.
 
@@ -134,8 +136,10 @@ Example excerpt:
   ],
   "analysis_meta": {
     "model": "muse-spark-1.3",
-    "prompt_version": "evidence-triage-v1",
+    "prompt_version": "evidence-triage-v2-meta-json-schema",
     "prompt_sha256": "...",
+    "output_format": "json_schema",
+    "reasoning_effort": "high",
     "elapsed_ms": 4200,
     "usage": {"prompt_tokens": 1400, "completion_tokens": 420, "total_tokens": 1820}
   },

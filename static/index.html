@@ -326,7 +326,7 @@ function focusEvidenceSource(item){
 }
 function renderChallenge(parent,challenge){
   if(!challenge)return;
-  const section=node("section","section");section.append(node("h3","","Second-pass challenge · advisory"));
+  const section=node("section","section");section.append(node("h3","","Cross-version Muse Spark challenge · advisory, not independent"));
   const status=challenge.status||"unavailable";
   const message=status==="clear"?"No specific concern was found in this pass. This is not independent verification.":
     status==="flagged"?"This pass raised a concern; the recommendation was downgraded to Need info for human review.":
@@ -347,7 +347,7 @@ function renderChallenge(parent,challenge){
     if(item.ambiguous)card.append(node("p","evidence-warning",`This exact quote appears ${item.match_count} times; the first occurrence is selected.`));
     if(item.explanation)card.append(node("p","evidence-explanation",item.explanation));section.append(card);
   });
-  const meta=challenge.analysis_meta;if(meta?.model){const tokens=meta.usage?.total_tokens?` · ${meta.usage.total_tokens} tokens`:"";section.append(node("p","hint",`Challenge model: ${meta.model} · ${meta.elapsed_ms||0} ms${tokens} · prompt ${meta.prompt_version||"unknown"}`));}
+  const meta=challenge.analysis_meta;if(meta?.model){const tokens=meta.usage?.total_tokens?` · ${meta.usage.total_tokens} tokens`:"";const format=meta.output_format==="json_schema"?"strict JSON Schema requested":"format unreported";section.append(node("p","hint",`Challenge model: ${meta.model} · ${format} · reasoning ${meta.reasoning_effort||"model default"} · ${meta.elapsed_ms||0} ms${tokens} · prompt ${meta.prompt_version||"unknown"}`));}
   parent.append(section);
 }
 function renderAnalysis(parent, report){
@@ -376,6 +376,7 @@ function renderAnalysis(parent, report){
   if(meta){
     addField(grid,"Model / prompt version",`${meta.model||"unknown"} · ${meta.prompt_version||"unknown"}`);
     addField(grid,"Prompt SHA-256",meta.prompt_sha256||"Not available.",true,true);
+    addField(grid,"Meta request settings",`${meta.output_format==="json_schema"?"Strict JSON Schema requested":"Format not reported"} · reasoning ${meta.reasoning_effort||"model default"}`);
     const tokens=meta.usage?.total_tokens?` · ${meta.usage.total_tokens} tokens`:"";
     addField(grid,"Model-call time",`${meta.elapsed_ms||0} ms${tokens}`);
   }
@@ -417,8 +418,8 @@ function renderDetail(report, events){
   const analyze = node("button", "btn primary", analyzing ? "Analysis in progress…" : anotherAnalysis ? "Wait for current analysis…" : report.analysis ? "Run analysis again" : "Analyze with Meta"); analyze.type = "button"; analyze.id = "analyzeButton";
   analyze.disabled = !state.hasKey || report.status === "reviewed" || !["admin","analyst"].includes(state.principal?.role) || Boolean(state.analysisPending);
   analyze.addEventListener("click", ()=>analyzeReport(report.id));
-  const challenge = node("button", "btn ghost", analyzing ? "Challenge in progress…" : anotherAnalysis ? "Wait for current analysis…" : report.analysis ? "Re-run analysis + challenge (extra API call)" : "Analyze + challenge (extra API call)"); challenge.type="button"; challenge.id="challengeButton";
-  challenge.disabled = analyze.disabled;challenge.title="Runs an additional advisory review pass and may incur additional Meta API usage.";
+  const challenge = node("button", "btn ghost", analyzing ? "Challenge in progress…" : anotherAnalysis ? "Wait for current analysis…" : report.analysis ? "Re-run analysis + cross-version challenge" : "Analyze + cross-version challenge"); challenge.type="button"; challenge.id="challengeButton";
+  challenge.disabled = analyze.disabled;challenge.title="Runs an additional advisory pass using a configured Muse Spark version different from the primary model, if available. This is not independent verification and incurs additional Meta API usage.";
   challenge.addEventListener("click",()=>analyzeReport(report.id,true));
   const remove = node("button", "btn danger", "Delete case and local history"); remove.type = "button";
   remove.hidden = state.principal?.role !== "admin";
@@ -454,8 +455,8 @@ function renderReview(parent, report){
 async function analyzeReport(id,challengePass=false){
   if(state.analysisPending)return;
   const accepted=window.confirm(challengePass
-    ?"This runs the normal analysis plus a second-pass challenge using another Meta API request. The second pass is advisory, not independent verification, and may incur additional cost. The report/code are sent only to your configured Meta endpoint; no target is contacted and no code is executed. Continue?"
-    :"This sends the selected report and supplied source snippet to the configured Meta Model API for analysis. It does not contact the reported target or execute the code. Continue?");
+    ?"This runs the normal analysis plus a second Muse Spark pass using a different configured version when available. It is advisory, not independent verification. The report, code, and first analysis are sent again to your configured Meta endpoint; this extra request may increase token usage, latency, and provider charges. No target is contacted and no code is executed. Continue?"
+    :"This sends the selected report and supplied source snippet to the configured Meta Model API for Muse Spark analysis. High reasoning is used by default and may increase token use, latency, and provider charges; the configured effort is shown with the result. It does not contact the reported target or execute the code. Continue?");
   if(!accepted)return;
   state.analysisPending=id;
   flash("Analysis is in progress and may take a while. Do not submit another analysis until this request finishes.","",true);

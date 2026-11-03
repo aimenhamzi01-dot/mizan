@@ -1,4 +1,4 @@
-"""Tiny standard-library client for the Meta Model API (OpenAI-compatible chat completions).
+"""Small standard-library client for Meta Model API Chat Completions.
 
 The application separately depends on `cryptography` for local API-key storage.
 """
@@ -11,7 +11,10 @@ import urllib.request
 from urllib.parse import urlsplit
 
 DEFAULT_BASE = "https://api.meta.ai/v1"
-DEFAULT_MODELS = "muse-spark-1.3,muse-spark-1.1"
+DEFAULT_MODELS = "muse-spark-1.3,muse-spark-1.2,muse-spark-1.1"
+DEFAULT_CHALLENGE_MODELS = "muse-spark-1.2,muse-spark-1.1"
+DEFAULT_REASONING_EFFORT = "high"
+SUPPORTED_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 MAX_RESPONSE_BYTES = 1_000_000
 _ALLOWED_USAGE_KEYS = {"prompt_tokens", "completion_tokens", "total_tokens"}
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
@@ -85,6 +88,35 @@ def get_config():
     return key, base, models
 
 
+def get_challenge_models(primary_model=None):
+    """Return configured challenge candidates, excluding the primary model."""
+    configured = os.environ.get("META_CHALLENGE_MODELS", DEFAULT_CHALLENGE_MODELS)
+    primary = primary_model.strip().casefold() if isinstance(primary_model, str) else ""
+    candidates, seen = [], set()
+    for candidate in configured.split(","):
+        candidate = candidate.strip()
+        key = candidate.casefold()
+        if candidate and key != primary and key not in seen:
+            candidates.append(candidate)
+            seen.add(key)
+    return candidates
+
+
+def get_reasoning_effort(model=None):
+    """Return the configured Muse reasoning budget; high is the security-review default."""
+    configured = os.environ.get("META_REASONING_EFFORT")
+    effort = DEFAULT_REASONING_EFFORT if configured is None else configured.strip().lower()
+    if not effort:
+        return None
+    if effort not in SUPPORTED_REASONING_EFFORTS:
+        raise MetaAPIError(
+            "META_REASONING_EFFORT must be minimal, low, medium, high, xhigh, or max.", 400
+        )
+    if effort == "max" and model != "muse-spark-1.3":
+        raise MetaAPIError("The max reasoning effort is available only with muse-spark-1.3.", 400)
+    return effort
+
+
 def has_key(api_key=None):
     """Report whether an explicit user key or legacy installation key exists."""
     return bool(api_key or get_config()[0])
@@ -108,23 +140,45 @@ def _safe_usage(value):
     }
 
 
-def chat(messages, *, api_key=None, max_tokens=3000, temperature=0.2, timeout=120,
-         return_metadata=False):
-    """Send a chat completion; optionally include response model and token usage."""
-    configured_key, base, models = get_config()
+def chat(
+    messages,
+    *,
+    api_key=None,
+    max_completion_tokens=3000,
+    temperature=None,
+    timeout=120,
+    return_metadata=False,
+    response_format=None,
+    model_candidates=None,
+):
+    """Call Meta Chat Completions, optionally constraining output and model choice.
+
+    Muse defaults are intentional: use Meta's default temperature, high reasoning,
+    and a caller-supplied JSON Schema when the task requires a typed response.
+    """
+    configured_key, base, configured_models = get_config()
     key = api_key or configured_key
     if not key:
         raise MetaAPIError("MODEL_API_KEY is not set. Add it to your .env file.", 401)
     _validate_base(base)
 
+    raw_models = configured_models if model_candidates is None else model_candidates
+    models = [str(model).strip() for model in raw_models if str(model).strip()]
+    if not models:
+        raise MetaAPIError("No model available.", 502)
+
     for model in models:
+        effort = get_reasoning_effort(model)
         payload = {
             "model": model,
             "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
+            "max_completion_tokens": max_completion_tokens,
         }
-        effort = os.environ.get("META_REASONING_EFFORT")
+        # Meta recommends the model's default temperature for Muse Spark.
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if response_format is not None:
+            payload["response_format"] = response_format
         if effort:
             payload["reasoning_effort"] = effort
 
@@ -152,6 +206,8 @@ def chat(messages, *, api_key=None, max_tokens=3000, temperature=0.2, timeout=12
                 "content": text,
                 "model": response_model[:120],
                 "usage": _safe_usage(data.get("usage")),
+                "reasoning_effort": effort or "model-default",
+                "output_format": "json_schema" if response_format is not None else "unspecified",
             }
         except urllib.error.HTTPError as e:
             if e.code in _REDIRECT_STATUSES:
@@ -164,7 +220,7 @@ def chat(messages, *, api_key=None, max_tokens=3000, temperature=0.2, timeout=12
             except (TimeoutError, socket.timeout):
                 raise MetaAPIError("The Meta API request timed out; provider usage may be uncertain.", 504)
             if e.code in (400, 404) and "model" in body.lower():
-                continue  # model name not available for this key: try the next one
+                continue  # model name not available for this key: try the next candidate
             raise MetaAPIError("Meta API returned HTTP status %d." % e.code, e.code)
         except (TimeoutError, socket.timeout):
             raise MetaAPIError("The Meta API request timed out; provider usage may be uncertain.", 504)
