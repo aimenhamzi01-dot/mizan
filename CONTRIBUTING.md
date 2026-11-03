@@ -14,6 +14,7 @@ Thanks for helping improve Mizan. Keep changes focused, tested offline, and cons
 
 - Never execute, import, simulate, or dynamically inspect submitted source code or proof-of-concept steps.
 - Never contact a vulnerability target or add target-validation features.
+- Keep the Phantom handoff as a bounded data-only preview unless a separately reviewed authorization design is approved. Never trigger Phantom scans, treat its `verified` flag as proof, or promote Phantom-generated source excerpts into researcher-supplied code.
 - Keep report/code separate from developer instructions; add adversarial tests for delimiters, placeholders, and prompt-like text.
 - Preserve output normalization and the hard acceptance guardrails: contradicted code cannot be accepted, and scanner-dump cannot be accepted.
 - Keep model analysis advisory. A final disposition requires an explicit authenticated human action and remains separate from model suggestion.

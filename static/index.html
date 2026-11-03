@@ -115,6 +115,12 @@ footer{color:var(--muted);font-size:.76rem;margin-top:22px;text-align:center}cod
           <div class="field"><label for="codeInput">Relevant source snippet <span class="hint">(optional; read-only)</span></label><textarea class="code" id="codeInput" maxlength="40000" spellcheck="false" placeholder="Paste only the relevant source text. It will never be executed."></textarea><small><span id="codeCount">0</span> / 40,000 characters</small></div>
           <div class="field"><label for="languageInput">Response language</label><select id="languageInput"><option value="en">English</option><option value="ar">Arabic</option></select></div>
           <div class="actions"><button class="btn primary" id="saveReportBtn" type="submit">Save report locally</button><button class="btn ghost" id="clearFormBtn" type="button">Clear form</button></div>
+          <div class="section" id="phantomImportBlock">
+            <h3>Import a completed Phantom result</h3>
+            <p class="hint">Choose a saved Phantom ScanResult JSON file. Mizan prepares an editable draft only; Phantom claims and its “verified” flag remain unverified. The file is sent to this Mizan instance for mapping. No scan, target contact, code execution, or Meta call occurs.</p>
+            <div class="field"><label for="phantomResultFile">Phantom result JSON</label><input id="phantomResultFile" type="file" accept=".json,application/json"></div>
+            <div class="actions"><button class="btn small" id="previewPhantomBtn" type="button">Load editable draft from Phantom JSON</button></div>
+          </div>
         </form>
         <div class="section"><h3>Load a safe built-in example</h3><p class="hint">Examples are bundled, synthetic demonstrations. Loading one does not call Meta.</p><div class="samples"><button class="btn small" type="button" data-sample="injection">Prompt-injection case</button><button class="btn small" type="button" data-sample="valid">IDOR evidence trail</button><button class="btn small" type="button" data-sample="noise">Scanner-noise case</button></div></div>
       </article>
@@ -491,6 +497,24 @@ $("newReportForm").addEventListener("submit",async e=>{
   try{const data=await api("/api/reports",{method:"POST",body:JSON.stringify({report,code,lang:$("languageInput").value})});
     $("newReportForm").reset();setCounts();flash("Report saved locally. No model call was made.");await refreshAll(data.report.id);
   }catch(err){flash(err.message,"error");}finally{button.disabled=false;}
+});
+$("previewPhantomBtn").addEventListener("click",async()=>{
+  const file=$("phantomResultFile").files?.[0];
+  if(!file){flash("Choose a saved Phantom ScanResult JSON file first.","error");return;}
+  if(file.size>1_500_000){flash("The selected file is too large for a safe import preview (1.5 MB maximum).","error");return;}
+  if(!window.confirm("The selected JSON will be sent to this Mizan instance to prepare an editable preview and will replace the current report text. It is not saved until you press Save report locally. This does not start a scan, contact a target, execute code, or call Meta. Continue?"))return;
+  const button=$("previewPhantomBtn");button.disabled=true;
+  try{
+    const result=JSON.parse(await file.text());
+    const preview=await api("/api/import/phantom/preview",{method:"POST",body:JSON.stringify({result,code:$("codeInput").value,lang:$("languageInput").value})});
+    $("reportInput").value=preview.report||"";
+    $("codeInput").value=preview.code||"";
+    $("languageInput").value=preview.lang||"en";
+    $("phantomResultFile").value="";
+    setCounts();
+    flash("Editable Phantom draft prepared. Review it, then choose Save report locally; no case or model analysis has been created.");
+  }catch(err){flash(err.message||"The selected file is not valid Phantom result JSON.","error");}
+  finally{button.disabled=false;}
 });
 $("clearFormBtn").addEventListener("click",()=>{$("newReportForm").reset();setCounts();});
 $("reportInput").addEventListener("input",setCounts);$("codeInput").addEventListener("input",setCounts);

@@ -50,6 +50,7 @@ Live Muse Spark analysis is optional. It requires a researcher's own Meta API ke
 - **Human decision, not auto-triage.** The model's proposed outcome is kept separate from the reviewer's recorded disposition. Recommendations do not close reports or trigger external actions.
 - **A deliberate second look.** An optional cross-version Muse Spark challenge asks for concrete contradictions, assumptions, or missing context. It requires separate consent and an extra model call; using another version of the same model family is not independent verification.
 - **A safer analysis boundary.** Report and code are treated as untrusted data. Mizan does not execute submitted code, exploit vulnerabilities, or contact a target.
+- **Mizan-led Phantom handoff.** Mizan remains the primary workbench and decision plane; Phantom is a subordinate scanner. Analysts can load a completed Phantom ScanResult JSON file into an editable Mizan draft. The import does not launch Phantom, contact a target, fetch source, execute code, or call Meta. Phantom findings and its `verified` flags remain unverified claims.
 - **Research-team control.** Mizan is self-hosted, supports workspace-scoped roles, and lets each researcher use their own encrypted-at-rest Meta API key and pay for their own model usage.
 
 ## How Mizan uses Meta models
@@ -79,6 +80,12 @@ The app binds to loopback by default. `docker compose down` preserves the databa
 Live use requires a Meta Model API key that the researcher is authorized to use; Mizan does not issue or share keys. Obtain provider access through the [Meta developer platform](https://dev.meta.ai/), sign in to Mizan, and save the key under **Your Meta API key**. Saving a key does not test it or send data. To perform a live test, save a built-in synthetic report, select it, choose **Analyze with Meta**, and confirm the data transfer. Each researcher is responsible for provider usage and any charges. The optional challenge pass makes an additional model request.
 
 The default endpoint is `https://api.meta.ai/v1`. Remote endpoints must use HTTPS; Mizan does not follow redirects, so configure the final trusted API URL directly. Cleartext HTTP is allowed only for loopback development endpoints. A saved key is not proof that the provider account, model access, or billing is active; the first explicit analysis is the connectivity check.
+
+### Bring a completed Phantom scan into Mizan
+
+Mizan is the primary workbench; Phantom is an optional subordinate scanner. Select a saved Phantom `ScanResult` JSON file in **New report** and choose **Load editable draft from Phantom JSON**. Mizan previews a whitelisted subset of the result in the report field; review and edit it before choosing **Save report locally**. Any source excerpt emitted by Phantom stays in the report as an unverified claim. Only code separately supplied by the researcher goes into Mizan's source-code field.
+
+This is a data handoff, not live orchestration: it does not start a Phantom scan, retrieve a target, or apply a fix. The preview is not saved until the researcher submits the ordinary local-save form, and model analysis still requires the usual explicit egress confirmation. Mizan does not treat Phantom's `verified` flag, CVSS, severity, or generated remediation as ground truth; it does not import Phantom's network reconnaissance details, bounty estimates, or program matches.
 
 ### Python-only setup
 

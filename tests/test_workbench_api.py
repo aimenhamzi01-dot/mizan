@@ -178,6 +178,53 @@ class WorkbenchAPITests(unittest.TestCase):
         self.assertNotIn("code", summary)
         self.assertEqual(summary["id"], case["id"])
 
+    def test_phantom_preview_is_local_non_persisting_and_never_calls_model(self):
+        phantom_result = {
+            "target": "https://example.test/messages",
+            "target_type": "code",
+            "scan_id": "SCAN-123",
+            "vulnerabilities": [{
+                "title": "Possible IDOR", "severity": "High", "verified": True,
+                "source_snippet": "Message.objects.get(id=message_id)",
+            }],
+        }
+        user_code = "def get_message(request, message_id): pass"
+        with patch.object(server.triage, "triage", side_effect=AssertionError("preview must not analyze")), \
+                patch.object(meta_client, "chat", side_effect=AssertionError("preview must not call Meta")):
+            status, _, body = self.request(
+                "/api/import/phantom/preview",
+                {"result": phantom_result, "code": user_code, "lang": "en"}, method="POST",
+            )
+        self.assertEqual(status, 200)
+        preview = json.loads(body)
+        self.assertIn("UNVERIFIED", preview["report"])
+        self.assertIn('"phantom_verified_flag_claim": true', preview["report"])
+        self.assertEqual(preview["code"], user_code)
+        self.assertEqual(preview["lang"], "en")
+        status, _, body = self.request("/api/reports")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["reports"], [])
+
+    def test_phantom_preview_is_restricted_to_analysts_and_admins(self):
+        viewer = self.create_user("phantom.preview.viewer", "viewer")
+        status, _, _ = self.request(
+            "/api/import/phantom/preview",
+            {"result": {"target": "example.test", "target_type": "web"}},
+            method="POST", token=viewer["token"],
+        )
+        self.assertEqual(status, 403)
+
+    def test_phantom_preview_rejects_invalid_result_without_saving(self):
+        status, _, body = self.request(
+            "/api/import/phantom/preview",
+            {"result": {"target_type": "web"}}, method="POST",
+        )
+        self.assertEqual(status, 400)
+        self.assertIn(b"target", body.lower())
+        status, _, body = self.request("/api/reports")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["reports"], [])
+
     def test_analysis_uses_mocked_model_and_does_not_become_final_decision(self):
         report_text = GOOD_REPORT
         source = GOOD_CODE

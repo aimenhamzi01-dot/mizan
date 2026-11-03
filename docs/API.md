@@ -93,6 +93,33 @@ curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports \
 
 The installation owner may include `workspace_id` to assign a case; an ordinary analyst cannot select another workspace. The returned case has `status: "received"`, `analysis: null`, and `review_decision: null`.
 
+## Preview a saved Phantom result
+
+Mizan is the primary workbench; Phantom is a subordinate scanner. An analyst or administrator can submit a previously saved Phantom `ScanResult` JSON object to the protected preview route:
+
+```http
+POST /api/import/phantom/preview
+Content-Type: application/json
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "result": {
+    "target": "https://example.test/api/messages",
+    "target_type": "code",
+    "scan_id": "SCAN-123",
+    "vulnerabilities": []
+  },
+  "code": "def get_message(request, message_id): pass",
+  "lang": "en"
+}
+```
+
+The endpoint returns `{ "report": "...", "code": "...", "lang": "en" }` for the browser's editable form. It is a stateless preview: it creates no case, calls no model, starts no Phantom scan, fetches no source, and contacts no target. The user must inspect the draft and separately submit it to `POST /api/reports` to save it locally.
+
+The mapper uses a bounded field allowlist. Phantom's vulnerability fields, static findings, source excerpts, severity, CVSS, remediation, and `verified` flag are preserved only as unverified claims in the report. Network reconnaissance details, bounty estimates, program matches, and submission guidance are omitted. The `code` field is reserved for code separately supplied by the researcher; Phantom-reported snippets are not promoted into it. Later model analysis still requires the existing explicit `confirm_egress` consent.
+
 ## Request an AI recommendation
 
 The authenticated analyst uses their own saved Meta key. The API requires explicit consent as well as the UI confirmation:

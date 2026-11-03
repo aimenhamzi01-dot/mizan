@@ -29,6 +29,7 @@ import meta_client  # noqa: E402
 import review_store  # noqa: E402
 import secret_store  # noqa: E402
 import triage  # noqa: E402
+import phantom_import  # noqa: E402
 from demo_data import DEMOS, SAMPLE_INPUT  # noqa: E402
 
 MAX_BODY = 2 * 1024 * 1024
@@ -406,6 +407,15 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(409, {"error": "Add your own encrypted Meta API key in your account profile before analysis."})
                     return
                 self._send(200, triage.triage(report, code, language, api_key=api_key, challenge_pass=challenge_pass))
+                return
+            if path == "/api/import/phantom/preview":
+                if not self._require_roles(ANALYZE_ROLES):
+                    return
+                preview = phantom_import.phantom_result_to_preview(
+                    payload.get("result"), language=payload.get("lang", "en"),
+                    user_code=payload.get("code", ""),
+                )
+                self._send(200, preview)
                 return
             if path == "/api/reports":
                 if not self._require_roles(ANALYZE_ROLES):
