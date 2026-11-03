@@ -121,6 +121,15 @@ footer{color:var(--muted);font-size:.76rem;margin-top:22px;text-align:center}cod
             <div class="field"><label for="phantomResultFile">Phantom result JSON</label><input id="phantomResultFile" type="file" accept=".json,application/json"></div>
             <div class="actions"><button class="btn small" id="previewPhantomBtn" type="button">Load editable draft from Phantom JSON</button></div>
           </div>
+          <div class="section" id="phantomTaskBlock">
+            <h3>Prepare an authorized Phantom task</h3>
+            <p class="hint">Creates a two-hour, manually transferable task manifest only. Mizan does not verify program scope or authorization and will not contact or scan the target. Verify permission independently, then provide the manifest to an isolated Phantom operator. Import the resulting JSON above when ready.</p>
+            <div class="field"><label for="phantomTarget">Target URL or package / hardware identifier</label><input id="phantomTarget" type="text" maxlength="512" placeholder="https://in-scope.example" required></div>
+            <div class="field"><label for="phantomTargetType">Target type</label><select id="phantomTargetType"><option value="web">Web</option><option value="code">Source code URL</option><option value="mobile">Mobile package identifier</option><option value="hardware">Hardware identifier</option></select></div>
+            <div class="field"><label for="phantomScope">Authorized checks (comma-separated)</label><input id="phantomScope" value="xss, idor, auth" maxlength="240"><small>Allowed: xss, sqli, ssrf, idor, logic, auth, rce, crypto, secrets, misconfiguration</small></div>
+            <label class="hint"><input id="phantomAuthorization" type="checkbox"> I confirm that I am authorized to test this target and the selected scope.</label>
+            <div class="actions"><button class="btn small" id="createPhantomTaskBtn" type="button">Create and download task manifest</button></div>
+          </div>
         </form>
         <div class="section"><h3>Load a safe built-in example</h3><p class="hint">Examples are bundled, synthetic demonstrations. Loading one does not call Meta.</p><div class="samples"><button class="btn small" type="button" data-sample="injection">Prompt-injection case</button><button class="btn small" type="button" data-sample="valid">IDOR evidence trail</button><button class="btn small" type="button" data-sample="noise">Scanner-noise case</button></div></div>
       </article>
@@ -514,6 +523,21 @@ $("previewPhantomBtn").addEventListener("click",async()=>{
     setCounts();
     flash("Editable Phantom draft prepared. Review it, then choose Save report locally; no case or model analysis has been created.");
   }catch(err){flash(err.message||"The selected file is not valid Phantom result JSON.","error");}
+  finally{button.disabled=false;}
+});
+$("createPhantomTaskBtn").addEventListener("click",async()=>{
+  const target=$("phantomTarget").value.trim();
+  const scope=$("phantomScope").value.split(",").map(x=>x.trim()).filter(Boolean);
+  if(!$("phantomAuthorization").checked){flash("Confirm that you are authorized for this target and scope.","error");return;}
+  if(!target){flash("Enter a target first.","error");return;}
+  const button=$("createPhantomTaskBtn");button.disabled=true;
+  try{
+    const data=await api("/api/phantom/tasks/manifest",{method:"POST",body:JSON.stringify({target,target_type:$("phantomTargetType").value,scope,authorized_scope:true})});
+    const manifest=data.manifest;
+    const blob=new Blob([JSON.stringify(manifest,null,2)+"\n"],{type:"application/json"});
+    const href=URL.createObjectURL(blob);const link=document.createElement("a");link.href=href;link.download=`mizan-phantom-task-${manifest.task_id}.json`;link.click();URL.revokeObjectURL(href);
+    flash(`Task ${manifest.task_id} prepared for manual handoff. It expires at ${manifest.expires_at}; no scan was started.`);
+  }catch(err){flash(err.message||"Could not create the Phantom task.","error");}
   finally{button.disabled=false;}
 });
 $("clearFormBtn").addEventListener("click",()=>{$("newReportForm").reset();setCounts();});

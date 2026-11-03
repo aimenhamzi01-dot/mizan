@@ -149,6 +149,7 @@ The evaluation command validates a small bundled set of synthetic English and Ar
 | `auth_store.py`, `secret_store.py` | Workspace identities, token digests, and encrypted personal model keys |
 | `review_store.py` | SQLite migrations, workspace-scoped reports, audit events, and metrics |
 | `static/index.html` | Researcher workbench and administration interface |
+| `phantom_task.py`, `phantom_import.py` | User-attested task-manifest handoff and safe Phantom result preview |
 | `scripts/bootstrap.py`, `scripts/run.py` | Private first-run setup and Docker startup |
 | `scripts/evaluate.py`, `tests/fixtures/` | Offline fixture validation and opt-in synthetic evaluation |
 | `Dockerfile`, `compose.yaml`, `tests/` | Container setup and regression coverage |
@@ -159,5 +160,6 @@ The evaluation command validates a small bundled set of synthetic English and Ar
 - [API reference](docs/API.md)
 - [Evaluation protocol](docs/EVALUATION.md)
 - [Operations guide](docs/OPERATIONS.md)
+- [Mizan–Phantom integration, phase 1](docs/PHANTOM_INTEGRATION.md)
 - [Security policy and limitations](SECURITY.md)
 - [MIT License](LICENSE)

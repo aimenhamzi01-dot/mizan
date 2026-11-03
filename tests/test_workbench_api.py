@@ -578,6 +578,31 @@ class WorkbenchAPITests(unittest.TestCase):
             stored = conn.execute("SELECT ciphertext FROM user_api_keys WHERE user_id=?", (analyst["user"]["id"],)).fetchone()[0]
         self.assertNotIn(personal_key.encode(), bytes(stored))
 
+    def test_phantom_task_manifest_requires_consent_and_analyst_role(self):
+        body = {
+            "target": "https://scope.example.org/app",
+            "target_type": "web",
+            "scope": ["xss", "idor"],
+            "authorized_scope": True,
+        }
+        status, _, response = self.request("/api/phantom/tasks/manifest", body, method="POST")
+        self.assertEqual(status, 201)
+        manifest = json.loads(response)["manifest"]
+        self.assertEqual(manifest["format"], "mizan-phantom-task-v1")
+        self.assertFalse(manifest["execution"]["automatic_execution"])
+        self.assertFalse(manifest["execution"]["network_access_by_mizan"])
+
+        body["authorized_scope"] = False
+        status, _, _ = self.request("/api/phantom/tasks/manifest", body, method="POST")
+        self.assertEqual(status, 400)
+
+        viewer = self.create_user("phantom.viewer", "viewer")
+        body["authorized_scope"] = True
+        status, _, _ = self.request(
+            "/api/phantom/tasks/manifest", body, method="POST", token=viewer["token"]
+        )
+        self.assertEqual(status, 403)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

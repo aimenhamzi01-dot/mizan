@@ -30,6 +30,7 @@ import review_store  # noqa: E402
 import secret_store  # noqa: E402
 import triage  # noqa: E402
 import phantom_import  # noqa: E402
+import phantom_task  # noqa: E402
 from demo_data import DEMOS, SAMPLE_INPUT  # noqa: E402
 
 MAX_BODY = 2 * 1024 * 1024
@@ -416,6 +417,20 @@ class Handler(BaseHTTPRequestHandler):
                     user_code=payload.get("code", ""),
                 )
                 self._send(200, preview)
+                return
+            if path == "/api/phantom/tasks/manifest":
+                if not self._require_roles(ANALYZE_ROLES):
+                    return
+                if self.principal.get("is_root"):
+                    workspace_id = payload.get("workspace_id", "default")
+                    if not isinstance(workspace_id, str) or not auth_store.list_workspaces(workspace_id):
+                        raise RequestError(400, "Choose a valid workspace for this task.")
+                else:
+                    workspace_id = self.principal["workspace_id"]
+                manifest = phantom_task.create_manifest(
+                    payload, requester=username, workspace_id=workspace_id,
+                )
+                self._send(201, {"manifest": manifest})
                 return
             if path == "/api/reports":
                 if not self._require_roles(ANALYZE_ROLES):
