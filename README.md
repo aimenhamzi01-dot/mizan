@@ -46,7 +46,7 @@ Live Muse Spark analysis is optional. It requires a researcher's own Meta API ke
 
 ## What makes Mizan different
 
-- **Evidence that can be checked.** The model returns report or code excerpts with source labels. Mizan checks each quote against the stated input and calculates its location and occurrence count so a reviewer can return to the original text.
+- **Evidence that can be checked.** The model returns report or code excerpts with source labels. Mizan checks each quote against the stated input and calculates its location and occurrence count so a reviewer can return to the original text. Any incomplete response schema or unverified quote is downgraded to `need-info` for human review.
 - **Human decision, not auto-triage.** The model's proposed outcome is kept separate from the reviewer's recorded disposition. Recommendations do not close reports or trigger external actions.
 - **A deliberate second look.** An optional challenge pass asks the model to surface concrete contradictions, assumptions, or missing context. It requires separate consent and is an additional model call—not independent verification.
 - **A safer analysis boundary.** Report and code are treated as untrusted data. Mizan does not execute submitted code, exploit vulnerabilities, or contact a target.
@@ -56,7 +56,7 @@ Live Muse Spark analysis is optional. It requires a researcher's own Meta API ke
 
 Mizan sends a report and optional pasted code to the configured Meta-compatible Model API only after an explicit user action and server-side egress confirmation. Muse Spark returns structured analysis, including the claim, possible injection attempts, code assessment, evidence excerpts, a suggested severity and disposition, and a draft reply. The configured model order defaults to `muse-spark-1.3` with `muse-spark-1.1` as fallback.
 
-The server checks the literal presence of each quoted excerpt before presenting it as verified. A failed citation check downgrades the suggestion to `need-info`. This check confirms text presence only—it does not prove that the quote is relevant, complete, true, or sufficient to establish exploitability. The optional challenge pass uses the same configured model endpoint, so it must not be described as an independent judge.
+The server checks the literal presence of each quoted excerpt before presenting it as verified and checks that the model response matches the expected schema. A failed citation or schema check downgrades the suggestion to `need-info`. This check confirms text presence only—it does not prove that the quote is relevant, complete, true, or sufficient to establish exploitability. The optional challenge pass uses the same configured model endpoint, so it must not be described as an independent judge.
 
 ## Run Mizan locally
 
@@ -71,6 +71,12 @@ python3 scripts/run.py
 On first run, the bootstrap creates a private `.env`, prints the installation-owner token once, and starts the app. Open <http://127.0.0.1:8000> and sign in with that token. The owner can create workspaces and issue individual researcher tokens from **Workspace administration**.
 
 The app binds to loopback by default. `docker compose down` preserves the database volume; `docker compose down -v` deletes it. Do not share the owner token: it grants global administrative access.
+
+### Enable live Muse Spark analysis
+
+Live use requires a Meta Model API key that the researcher is authorized to use; Mizan does not issue or share keys. Obtain provider access through the [Meta developer platform](https://dev.meta.ai/), sign in to Mizan, and save the key under **Your Meta API key**. Saving a key does not test it or send data. To perform a live test, save a built-in synthetic report, select it, choose **Analyze with Meta**, and confirm the data transfer. Each researcher is responsible for provider usage and any charges. The optional challenge pass makes an additional model request.
+
+The default endpoint is `https://api.meta.ai/v1`. Remote endpoints must use HTTPS; Mizan does not follow redirects, so configure the final trusted API URL directly. Cleartext HTTP is allowed only for loopback development endpoints. A saved key is not proof that the provider account, model access, or billing is active; the first explicit analysis is the connectivity check.
 
 ### Python-only setup
 

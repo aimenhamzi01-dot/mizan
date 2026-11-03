@@ -135,7 +135,7 @@ footer{color:var(--muted);font-size:.76rem;margin-top:22px;text-align:center}cod
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
-const state = {hasKey:false, selectedId:null, reports:[], flashTimer:null, token:"", principal:null};
+const state = {hasKey:false, selectedId:null, reports:[], flashTimer:null, token:"", principal:null, analysisPending:null};
 const decisionLabels = {accept:"Accept", "need-info":"Need info", duplicate:"Duplicate", reject:"Reject"};
 
 function node(tag, className, text){
@@ -144,10 +144,10 @@ function node(tag, className, text){
   if(text !== undefined && text !== null) el.textContent = String(text);
   return el;
 }
-function flash(message, kind="success"){
+function flash(message, kind="success", persistent=false){
   const box = $("flash"); box.textContent = message; box.className = "flash " + kind; box.hidden = !message;
   clearTimeout(state.flashTimer);
-  if(message) state.flashTimer = setTimeout(()=>{box.hidden=true;}, 5200);
+  if(message && !persistent) state.flashTimer = setTimeout(()=>{box.hidden=true;}, 5200);
 }
 async function api(path, options={}){
   const headers = Object.assign({}, options.headers || {});
@@ -186,13 +186,13 @@ function setCounts(){
 function renderHealth(health){
   state.hasKey = Boolean(health.has_key);
   const badge = $("apiStatus"); badge.replaceChildren();
-  const dot = node("span", "dot" + (state.hasKey ? " online" : "")); badge.append(dot, document.createTextNode(state.hasKey ? "Meta key ready" : "Add your Meta key"));
+  const dot = node("span", "dot" + (state.hasKey ? " online" : "")); badge.append(dot, document.createTextNode(state.hasKey ? "Meta key saved" : "Add your Meta key"));
 }
 async function loadProfile(){
   const me = await api("/api/me"); state.principal = me;
   const account = $("accountBadge"); account.textContent = `${me.username} · ${me.role}`; account.hidden = false;
   $("profileCard").hidden = false;
-  $("modelKeyStatus").textContent = me.has_model_key ? "Your personal key is configured. The raw key is not shown or sent back by Mizan." : "No personal Meta API key is saved yet. Add one to enable live analysis.";
+  $("modelKeyStatus").textContent = me.has_model_key ? "Your personal key is saved, but Mizan has not tested it. Provider access is checked only when you explicitly run an analysis." : "No personal Meta API key is saved yet. Add one to enable live analysis.";
   const canAdmin = me.role === "admin";
   $("adminCard").hidden = !canAdmin;
   if(canAdmin) await loadAdminPanel();
@@ -412,10 +412,12 @@ function renderDetail(report, events){
   const status = node("span", "status " + report.status, report.status.replace("-", " ")); header.append(heading, status); root.append(header);
   const details = node("p", "hint", `Received ${formatDate(report.created_at)} · Language: ${report.language === "ar" ? "Arabic" : "English"}`); root.append(details);
   const topActions = node("div", "actions");
-  const analyze = node("button", "btn primary", report.analysis ? "Run analysis again" : "Analyze with Meta"); analyze.type = "button";
-  analyze.disabled = !state.hasKey || report.status === "reviewed" || !["admin","analyst"].includes(state.principal?.role);
+  const analyzing = state.analysisPending === report.id;
+  const anotherAnalysis = Boolean(state.analysisPending) && !analyzing;
+  const analyze = node("button", "btn primary", analyzing ? "Analysis in progress…" : anotherAnalysis ? "Wait for current analysis…" : report.analysis ? "Run analysis again" : "Analyze with Meta"); analyze.type = "button"; analyze.id = "analyzeButton";
+  analyze.disabled = !state.hasKey || report.status === "reviewed" || !["admin","analyst"].includes(state.principal?.role) || Boolean(state.analysisPending);
   analyze.addEventListener("click", ()=>analyzeReport(report.id));
-  const challenge = node("button", "btn ghost", report.analysis ? "Re-run analysis + challenge (extra API call)" : "Analyze + challenge (extra API call)"); challenge.type="button";
+  const challenge = node("button", "btn ghost", analyzing ? "Challenge in progress…" : anotherAnalysis ? "Wait for current analysis…" : report.analysis ? "Re-run analysis + challenge (extra API call)" : "Analyze + challenge (extra API call)"); challenge.type="button"; challenge.id="challengeButton";
   challenge.disabled = analyze.disabled;challenge.title="Runs an additional advisory review pass and may incur additional Meta API usage.";
   challenge.addEventListener("click",()=>analyzeReport(report.id,true));
   const remove = node("button", "btn danger", "Delete case and local history"); remove.type = "button";
@@ -450,13 +452,25 @@ function renderReview(parent, report){
   box.append(form);section.append(box);parent.append(section);
 }
 async function analyzeReport(id,challengePass=false){
+  if(state.analysisPending)return;
   const accepted=window.confirm(challengePass
     ?"This runs the normal analysis plus a second-pass challenge using another Meta API request. The second pass is advisory, not independent verification, and may incur additional cost. The report/code are sent only to your configured Meta endpoint; no target is contacted and no code is executed. Continue?"
     :"This sends the selected report and supplied source snippet to the configured Meta Model API for analysis. It does not contact the reported target or execute the code. Continue?");
   if(!accepted)return;
-  flash("Sending this case to the configured Meta Model API…");
+  state.analysisPending=id;
+  flash("Analysis is in progress and may take a while. Do not submit another analysis until this request finishes.","",true);
+  const analyzeButton=$("analyzeButton"),challengeButton=$("challengeButton");
+  if(analyzeButton){analyzeButton.disabled=true;analyzeButton.textContent="Analysis in progress…";}
+  if(challengeButton){challengeButton.disabled=true;challengeButton.textContent=challengePass?"Challenge in progress…":"Wait for current analysis…";}
   const payload={confirm_egress:true};if(challengePass){payload.challenge_pass=true;payload.confirm_challenge_egress=true;}
-  try{const data=await api(`/api/reports/${encodeURIComponent(id)}/analyze`,{method:"POST",body:JSON.stringify(payload)});flash(challengePass?"Analysis and challenge pass complete. Review both before recording a human disposition.":"Analysis complete. Review the recommendation before recording a human disposition.");await refreshAll(id);}catch(e){flash(e.message,"error");}
+  try{
+    await api(`/api/reports/${encodeURIComponent(id)}/analyze`,{method:"POST",body:JSON.stringify(payload)});
+    flash(challengePass?"Analysis and challenge pass complete. Review both before recording a human disposition.":"Analysis complete. Review the recommendation before recording a human disposition.");
+  }catch(e){flash(e.message,"error");}
+  finally{
+    state.analysisPending=null;
+    try{await refreshAll(state.selectedId);}catch(e){flash(e.message,"error");}
+  }
 }
 async function deleteReport(id){
   if(!window.confirm("Remove this case and its application-level history from the local database? This cannot be undone through Mizan. Separate backups or database copies are not affected."))return;

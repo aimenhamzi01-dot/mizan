@@ -105,6 +105,33 @@ def _verified_evidence(data, report, code):
     return result, integrity
 
 
+def _has_complete_triage_schema(data):
+    if not isinstance(data, dict):
+        return False
+    string_fields = (
+        "claim", "component", "claimed_impact", "noise", "code_verification",
+        "code_evidence", "severity", "severity_reasoning", "decision",
+        "decision_reasoning", "draft_reply",
+    )
+    list_fields = ("repro_steps", "injection_attempts", "evidence", "missing_context")
+    if any(not isinstance(data.get(field), str) for field in string_fields):
+        return False
+    if any(not isinstance(data.get(field), list) for field in list_fields):
+        return False
+    if data["noise"] not in NOISE or data["code_verification"] not in VERIFY:
+        return False
+    if data["severity"] not in SEVERITY or data["decision"] not in DECISION:
+        return False
+    for item in data["evidence"]:
+        if not isinstance(item, dict):
+            return False
+        if not all(isinstance(item.get(field), str) for field in ("source", "quote", "relation", "explanation")):
+            return False
+        if item["source"] not in EVIDENCE_SOURCES or item["relation"] not in EVIDENCE_RELATIONS:
+            return False
+    return True
+
+
 def normalize(data, report="", code=""):
     if not isinstance(data, dict):
         data = {}
@@ -130,7 +157,11 @@ def normalize(data, report="", code=""):
     if not citations_verified:
         decision = "need-info"
         caveat = " Mizan could not verify every evidence quote against its stated source; the recommendation was downgraded."
-        decision_reasoning = (decision_reasoning + caveat).strip()[:500]
+        decision_reasoning = (decision_reasoning[:350] + caveat).strip()[:500]
+    if not _has_complete_triage_schema(data):
+        decision = "need-info"
+        caveat = " The model response was incomplete or did not match the required response schema; review the case manually before disposition."
+        decision_reasoning = (decision_reasoning[:350] + caveat).strip()[:500]
 
     return {
         "claim": str(data.get("claim", ""))[:600],

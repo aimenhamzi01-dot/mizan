@@ -245,7 +245,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": str(exc)})
         elif isinstance(exc, meta_client.MetaAPIError):
             # Upstream 401/403 must not be confused with this user's Mizan token.
-            self._send(502, {"error": SAFE_MODEL_ERROR})
+            if exc.status == 504:
+                self._send(504, {"error": "The Meta API request timed out. Provider usage may be uncertain; check your provider account before retrying."})
+            else:
+                self._send(502, {"error": SAFE_MODEL_ERROR})
         else:
             print("Unhandled local API error in " + method, file=sys.stderr)
             self._send(500, {"error": "Internal server error."})

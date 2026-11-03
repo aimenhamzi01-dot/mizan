@@ -77,6 +77,19 @@ class Normalize(unittest.TestCase):
         d = dict(GOOD, evidence=[{"source": [], "quote": "x", "relation": [], "explanation": "bad"}])
         self.assertEqual(triage.normalize(d, GOOD_REPORT, GOOD_CODE)["decision"], "need-info")
 
+    def test_incomplete_model_schema_cannot_recommend_accept(self):
+        for field in ("component", "severity_reasoning", "repro_steps"):
+            with self.subTest(field=field):
+                data = json.loads(json.dumps(GOOD))
+                del data[field]
+                result = triage.normalize(data, GOOD_REPORT, GOOD_CODE)
+                self.assertEqual(result["decision"], "need-info")
+                self.assertIn("incomplete", result["decision_reasoning"].lower())
+        data = dict(GOOD, decision_reasoning="x" * 500)
+        del data["component"]
+        result = triage.normalize(data, GOOD_REPORT, GOOD_CODE)
+        self.assertIn("incomplete", result["decision_reasoning"].lower())
+
     def test_evidence_offsets_and_repeated_quote_count_are_server_computed(self):
         data = json.loads(json.dumps(GOOD))
         data["evidence"][0]["quote"] = "repeat quote"
@@ -274,6 +287,12 @@ class HttpServer(unittest.TestCase):
         def boom(m, **kw): raise meta_client.MetaAPIError("no key", 401)
         meta_client.chat = boom
         s, _ = self.call("/api/triage", {"report": "r", "confirm_egress": True}); self.assertEqual(s, 502)
+        def timed_out(m, **kw): raise meta_client.MetaAPIError("private timeout details", 504)
+        meta_client.chat = timed_out
+        s, b = self.call("/api/triage", {"report": "r", "confirm_egress": True})
+        self.assertEqual(s, 504)
+        self.assertIn(b"usage may be uncertain", b)
+        self.assertNotIn(b"private timeout details", b)
         meta_client.chat = lambda m, **kw: 1 / 0
         s, b = self.call("/api/triage", {"report": "r", "confirm_egress": True}); self.assertEqual(s, 500); self.assertNotIn(b"Traceback", b)
         s, _ = self.call("/api/nope", {}); self.assertEqual(s, 404)

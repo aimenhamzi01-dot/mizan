@@ -121,7 +121,11 @@ def prepare_env(root: Path = ROOT) -> Optional[str]:
         if not PROJECT_NAME_PATTERN.fullmatch(project_entry[0][1]):
             raise ValueError("COMPOSE_PROJECT_NAME must use lowercase letters, digits, '_' or '-'.")
     else:
-        lines.append("COMPOSE_PROJECT_NAME=mizan-" + secrets.token_hex(8))
+        # Older installations used the Compose file's fixed default project name.
+        # Preserve that volume identity when upgrading an existing .env; only new
+        # installations receive a unique project name.
+        project_name = "mizan" if env_existed else "mizan-" + secrets.token_hex(8)
+        lines.append("COMPOSE_PROJECT_NAME=" + project_name)
 
     updated_text = "\n".join(lines).rstrip("\n") + "\n"
     if token is not None or not env_existed or updated_text != text:

@@ -17,7 +17,8 @@ Mizan is a self-hosted team workbench. One operator-controlled installation can 
 - Per-user Meta API keys are encrypted at rest with AES-256-GCM (via `cryptography`). The installation's 32-byte `MIZAN_ENCRYPTION_KEY` is held in `.env`, never returned through the API, and must be backed up securely. Losing it makes saved user API keys unreadable. Possession of both the database and encryption key permits decryption.
 - User tokens are bearer secrets. They are not stored in browser local/session storage; the UI keeps the current token in memory and sends it in the `Authorization` header.
 - Saving a case makes no model request. Live analysis requires both UI confirmation and `confirm_egress: true` at the API. The authenticated user's own key is used; only the installation owner can fall back to the optional legacy environment key.
-- `META_API_BASE` receives the provider bearer key and case content during live analysis. Treat this operator setting as trusted. Do not point it at an untrusted host.
+- `META_API_BASE` receives the provider bearer key and case content during live analysis. Treat this operator setting as trusted and use a provider endpoint you are authorized to use. Remote endpoints must use HTTPS; cleartext HTTP is accepted only for loopback development. The client rejects redirects rather than forwarding the bearer key or case content to a second origin.
+- An upstream timeout is surfaced as HTTP 504 and warns that provider usage may be uncertain; Mizan does not automatically retry a timed-out analysis. Check the provider account before manually retrying.
 - Cases remain until manually deleted or the database is removed. There is no automatic retention period. Deletion removes the case and application-level event history, but cannot guarantee forensic erasure from backups, snapshots, or storage media.
 - Routine logs and API errors omit report text, source code, bearer tokens, API keys, and upstream provider error bodies.
 
@@ -31,7 +32,7 @@ Mizan is a self-hosted team workbench. One operator-controlled installation can 
 
 ## AI and review boundaries
 
-Submitted source and reproduction steps are stored as text only. Mizan never executes submitted code, runs exploits, probes a target, or initiates target connectivity. The triage layer keeps report/code separate from system instructions, JSON-quotes untrusted values, and retains hard guardrails that prevent acceptance when supplied code contradicts a claim or the report is classified as scanner noise.
+Submitted source and reproduction steps are stored as text only. Mizan never executes submitted code, runs exploits, probes a target, or initiates target connectivity. The triage layer keeps report/code separate from system instructions, JSON-quotes untrusted values, checks the expected response schema, and retains hard guardrails that prevent acceptance when the response is incomplete, supplied code contradicts a claim, the report is classified as scanner noise, or source quotes cannot be verified literally.
 
 These controls reduce risk but do not make model output infallible. The model cannot infer omitted route decorators, middleware, deployment settings, or other authorization layers from a partial snippet. Every final disposition remains a human responsibility. Mizan does not close tickets, contact programs, or message reporters.
 

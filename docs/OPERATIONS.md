@@ -14,7 +14,7 @@ The launcher creates a private `.env`, generates an installation-owner token, pr
 
 Alternatively, run `python3 scripts/bootstrap.py` to prepare `.env` first, save the one-time owner token securely, then start with `docker compose up --build`.
 
-The container runs non-root, with a read-only root filesystem, dropped capabilities, and a volume at `/app/data`. The Docker volume is named `<COMPOSE_PROJECT_NAME>_mizan-data`; the project name is generated per installation. `docker compose down` preserves data. `docker compose down -v` deletes it.
+The container runs non-root, with a read-only root filesystem, dropped capabilities, and a volume at `/app/data`. New installations get a unique `COMPOSE_PROJECT_NAME`, making the Docker volume `<COMPOSE_PROJECT_NAME>_mizan-data`. Keep `.env` with the installation. `docker compose down` preserves data; `docker compose down -v` deletes it.
 
 ## 2. Create workspaces and users
 
@@ -33,7 +33,7 @@ Tokens are bearer secrets with no automatic expiry. Store them in an approved pa
 
 Each researcher signs in with their personal token, opens **Your Meta API key**, and saves a provider key they are authorized to use. The key is encrypted in the local SQLite database with AES-256-GCM and the private `MIZAN_ENCRYPTION_KEY` from `.env`. Mizan never returns the saved key to the browser. Each user's analysis uses only that user's saved key; the optional `MODEL_API_KEY` environment variable is a legacy fallback for the installation owner only.
 
-Each researcher is responsible for their provider account, authorization, and usage charges. No Mizan service pays or shares a provider key. Live analysis sends the selected report and snippet to `META_API_BASE` only after an explicit confirmation. Use only a trusted endpoint.
+Each researcher is responsible for their provider account, authorization, and usage charges. No Mizan service pays or shares a provider key. Live analysis sends the selected report and snippet to `META_API_BASE` only after an explicit confirmation. Use only a trusted endpoint. Remote endpoints must use HTTPS; cleartext HTTP is allowed only for localhost/loopback development. Mizan rejects redirects so a provider key and case content cannot be forwarded to a second origin. A saved key is not tested until the first explicitly confirmed analysis.
 
 ### Encryption-key backup and recovery
 
@@ -67,15 +67,47 @@ Python mode binds to `127.0.0.1:8000` and defaults to `data/mizan.sqlite3`. Conf
 
 On startup, Mizan upgrades the SQLite schema to version 2. Existing cases are assigned to the `default` workspace and remain accessible to the installation owner. After upgrading an older `.env`, run the bootstrap script once to generate `MIZAN_ENCRYPTION_KEY`; do not overwrite an already initialized key. Create new workspaces and accounts after the migration.
 
-Before upgrading, back up both the database volume and `.env`. Keep the encryption key matched to the database snapshot. If a key is missing after it was initialized, restore the original `.env` from backup rather than allowing a replacement.
+Before upgrading, back up both the database and `.env`. Keep the encryption key matched to the database snapshot. If a key is missing after it was initialized, restore the original `.env` from backup rather than allowing a replacement. Existing `.env` files that lack `COMPOSE_PROJECT_NAME` retain the legacy Compose name `mizan`; fresh installations receive a unique name. If the installation used a custom Compose project name (for example via `-p` or a shell environment variable), record and keep that exact name in `.env` before upgrading or restoring, or Compose may attach a new empty volume.
 
 ## 7. Storage, privacy, and retention
 
 The SQLite database stores report bodies, pasted code, recommendations, reviewer names/notes, and audit events as plaintext. The provider keys alone are encrypted. Protect the host, volume, `.env`, and backups with restrictive access. Mizan has no automatic retention expiry or centralized recovery service. Deleting a case removes it and its application-level history, but cannot erase backups or guarantee physical-media sanitization.
 
-For Docker backups, identify the named volume with `docker volume ls`; it uses the installation's Compose project prefix. Stop the app before a simple file-level copy. Protect backups with restrictive filesystem permissions and a defined retention policy. Do not commit backups or `.env`.
+## 8. Backup and restore
 
-## 8. Health and API access
+The database contains plaintext reports, pasted code, decisions, and review notes. Store backups outside the repository in a private location and encrypt them before off-host transfer. Back up the matching `.env` too; the database and `MIZAN_ENCRYPTION_KEY` must come from the same snapshot.
+
+For Docker, SQLite's online backup API creates a consistent snapshot while Mizan is running:
+
+```bash
+BACKUP_DIR="$HOME/mizan-backups/$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$BACKUP_DIR"
+chmod 700 "$HOME/mizan-backups" "$BACKUP_DIR"
+docker compose exec -T mizan python -c 'import sqlite3; source=sqlite3.connect("/app/data/mizan.sqlite3"); target=sqlite3.connect("/tmp/mizan-backup.sqlite3"); source.backup(target); target.close(); source.close()'
+docker compose cp mizan:/tmp/mizan-backup.sqlite3 "$BACKUP_DIR/mizan.sqlite3"
+install -m 600 .env "$BACKUP_DIR/.env"
+chmod 600 "$BACKUP_DIR/mizan.sqlite3"
+docker compose exec -T mizan rm -f /tmp/mizan-backup.sqlite3
+```
+
+To restore into this Compose project, stop the service first. Use the `.env` that matches the backup and ensure its `COMPOSE_PROJECT_NAME` selects the intended data volume. If no service container exists yet, `docker compose create mizan` creates one and its volume. Copy the database into the mounted volume, then use SQLite's backup API to restore it without changing the live database file's ownership:
+
+```bash
+BACKUP_DIR="$HOME/mizan-backups/REPLACE-WITH-BACKUP-DIRECTORY"
+docker compose stop mizan
+install -m 600 "$BACKUP_DIR/.env" .env
+docker compose build mizan
+docker compose create mizan
+chmod 644 "$BACKUP_DIR/mizan.sqlite3"  # BACKUP_DIR must be private (mode 0700)
+docker compose cp "$BACKUP_DIR/mizan.sqlite3" mizan:/app/data/mizan-restore.sqlite3
+chmod 600 "$BACKUP_DIR/mizan.sqlite3"
+docker compose run --rm --no-deps --entrypoint python mizan -c 'import os,sqlite3; path="/app/data/mizan-restore.sqlite3"; source=sqlite3.connect(path); target=sqlite3.connect("/app/data/mizan.sqlite3"); source.backup(target); target.close(); source.close(); os.remove(path)'
+docker compose up -d
+```
+
+Verify `GET /healthz`, sign in with the restored owner token, confirm cases are present, and confirm saved researcher keys decrypt. Test recovery periodically with a non-production copy. Never regenerate an encryption key for an existing database.
+
+## 9. Health and API access
 
 `GET /healthz` is unauthenticated and returns only `{"ok":true}` for container readiness. All `/api/*` routes require an owner or user Bearer token. The owner token has global rights; user tokens are workspace-scoped and role-limited. See [API.md](API.md) for route behavior.
 

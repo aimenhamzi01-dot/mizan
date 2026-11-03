@@ -1,9 +1,11 @@
 import io
 import json
 import os
+import threading
 import unittest
-from unittest.mock import patch
 import urllib.error
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import patch
 
 import meta_client
 
@@ -36,10 +38,10 @@ class MetaClientTests(unittest.TestCase):
         }
         messages = [{"role": "system", "content": "test system"}, {"role": "user", "content": "test data"}]
         with patch.dict(os.environ, env, clear=True), patch(
-            "meta_client.urllib.request.urlopen", return_value=response_text("model answer")
-        ) as urlopen:
+            "meta_client._open_request", return_value=response_text("model answer")
+        ) as opener:
             self.assertEqual(meta_client.chat(messages), "model answer")
-        request = urlopen.call_args.args[0]
+        request = opener.call_args.args[0]
         payload = json.loads(request.data.decode("utf-8"))
         self.assertEqual(request.full_url, "https://api.meta.ai/v1/chat/completions")
         self.assertEqual(request.get_header("Authorization"), "Bearer test-key-not-real")
@@ -47,7 +49,7 @@ class MetaClientTests(unittest.TestCase):
         self.assertEqual(payload["model"], "muse-spark-1.3")
         self.assertEqual(payload["messages"], messages)
         self.assertEqual(payload["reasoning_effort"], "medium")
-        self.assertEqual(urlopen.call_args.kwargs["timeout"], 120)
+        self.assertEqual(opener.call_args.kwargs["timeout"], 120)
 
     def test_response_metadata_is_opt_in_and_usage_is_allowlisted(self):
         body = json.dumps({
@@ -57,7 +59,7 @@ class MetaClientTests(unittest.TestCase):
         }).encode("utf-8")
         env = {"MODEL_API_KEY": "test-key", "META_MODEL": "muse-spark-1.3"}
         with patch.dict(os.environ, env, clear=True), patch(
-            "meta_client.urllib.request.urlopen", return_value=FakeResponse(body)
+            "meta_client._open_request", return_value=FakeResponse(body)
         ):
             result = meta_client.chat([], return_metadata=True)
         self.assertEqual(result["content"], "model answer")
@@ -68,7 +70,7 @@ class MetaClientTests(unittest.TestCase):
         body = json.dumps({"choices": [{"message": {"content": "model answer"}}]}).encode("utf-8")
         env = {"MODEL_API_KEY": "test-key", "META_MODEL": "muse-spark-1.3"}
         with patch.dict(os.environ, env, clear=True), patch(
-            "meta_client.urllib.request.urlopen", return_value=FakeResponse(body)
+            "meta_client._open_request", return_value=FakeResponse(body)
         ):
             result = meta_client.chat([], return_metadata=True)
         self.assertEqual(result["model"], "muse-spark-1.3")
@@ -84,7 +86,7 @@ class MetaClientTests(unittest.TestCase):
         )
         calls = []
 
-        def fake_urlopen(request, timeout):
+        def fake_open(request, timeout):
             calls.append(json.loads(request.data.decode("utf-8"))["model"])
             if len(calls) == 1:
                 raise error
@@ -95,7 +97,7 @@ class MetaClientTests(unittest.TestCase):
             "META_API_BASE": "https://api.meta.ai/v1",
             "META_MODEL": "first-model,second-model",
         }
-        with patch.dict(os.environ, env, clear=True), patch("meta_client.urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch.dict(os.environ, env, clear=True), patch("meta_client._open_request", side_effect=fake_open):
             self.assertEqual(meta_client.chat([]), "fallback answer")
         self.assertEqual(calls, ["first-model", "second-model"])
 
@@ -108,7 +110,7 @@ class MetaClientTests(unittest.TestCase):
             io.BytesIO(b"fake-key-should-not-leak report-secret-123"),
         )
         env = {"MODEL_API_KEY": "test-key", "META_API_BASE": "https://api.meta.ai/v1", "META_MODEL": "muse-spark-1.3"}
-        with patch.dict(os.environ, env, clear=True), patch("meta_client.urllib.request.urlopen", side_effect=error):
+        with patch.dict(os.environ, env, clear=True), patch("meta_client._open_request", side_effect=error):
             with self.assertRaises(meta_client.MetaAPIError) as caught:
                 meta_client.chat([])
         self.assertEqual(caught.exception.status, 401)
@@ -118,28 +120,106 @@ class MetaClientTests(unittest.TestCase):
     def test_network_error_reason_is_not_exposed(self):
         env = {"MODEL_API_KEY": "test-key", "META_API_BASE": "https://api.meta.ai/v1"}
         with patch.dict(os.environ, env, clear=True), patch(
-            "meta_client.urllib.request.urlopen", side_effect=urllib.error.URLError("secret host detail")
+            "meta_client._open_request", side_effect=urllib.error.URLError("secret host detail")
         ):
             with self.assertRaises(meta_client.MetaAPIError) as caught:
                 meta_client.chat([])
         self.assertEqual(caught.exception.status, 502)
         self.assertNotIn("secret host detail", str(caught.exception))
 
+    def test_redirect_is_not_followed_to_another_origin(self):
+        captured_authorizations = []
+
+        class CaptureHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                captured_authorizations.append(self.headers.get("Authorization"))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"choices":[{"message":{"content":"redirected"}}]}')
+
+            def log_message(self, *args):
+                pass
+
+        capture = ThreadingHTTPServer(("127.0.0.1", 0), CaptureHandler)
+        capture_thread = threading.Thread(target=capture.serve_forever, daemon=True)
+        capture_thread.start()
+
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(302)
+                self.send_header("Location", "http://127.0.0.1:%d/v1/chat/completions" % capture.server_port)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        redirect = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+        redirect_thread = threading.Thread(target=redirect.serve_forever, daemon=True)
+        redirect_thread.start()
+        env = {
+            "MODEL_API_KEY": "test-key-must-not-forward",
+            "META_API_BASE": "http://127.0.0.1:%d/v1" % redirect.server_port,
+            "META_MODEL": "muse-spark-1.3",
+        }
+        try:
+            with patch.dict(os.environ, env, clear=True):
+                with self.assertRaises(meta_client.MetaAPIError) as caught:
+                    meta_client.chat([])
+            self.assertEqual(caught.exception.status, 502)
+            self.assertIn("redirected", str(caught.exception))
+            self.assertEqual(captured_authorizations, [])
+        finally:
+            redirect.shutdown()
+            redirect.server_close()
+            capture.shutdown()
+            capture.server_close()
+
+    def test_remote_http_endpoint_is_rejected_before_network_access(self):
+        env = {"MODEL_API_KEY": "test-key", "META_API_BASE": "http://provider.example/v1"}
+        with patch.dict(os.environ, env, clear=True), patch("meta_client._open_request") as opener:
+            with self.assertRaises(meta_client.MetaAPIError) as caught:
+                meta_client.chat([])
+        self.assertEqual(caught.exception.status, 400)
+        self.assertIn("HTTPS", str(caught.exception))
+        opener.assert_not_called()
+
+    def test_loopback_http_endpoint_is_allowed_for_local_development(self):
+        env = {"MODEL_API_KEY": "test-key", "META_API_BASE": "http://localhost:9000/v1"}
+        with patch.dict(os.environ, env, clear=True), patch(
+            "meta_client._open_request", return_value=response_text("local answer")
+        ) as opener:
+            self.assertEqual(meta_client.chat([]), "local answer")
+        self.assertEqual(opener.call_args.args[0].full_url, "http://localhost:9000/v1/chat/completions")
+
+    def test_timeouts_are_reported_safely_and_usage_uncertainty_is_clear(self):
+        env = {"MODEL_API_KEY": "test-key", "META_API_BASE": "https://api.meta.ai/v1"}
+        failures = [TimeoutError("private timeout detail"), urllib.error.URLError(TimeoutError("private timeout detail"))]
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                with patch.dict(os.environ, env, clear=True), patch(
+                    "meta_client._open_request", side_effect=failure
+                ):
+                    with self.assertRaises(meta_client.MetaAPIError) as caught:
+                        meta_client.chat([])
+                self.assertEqual(caught.exception.status, 504)
+                self.assertIn("usage may be uncertain", str(caught.exception))
+                self.assertNotIn("private timeout detail", str(caught.exception))
+
     def test_oversized_response_is_rejected(self):
         env = {"MODEL_API_KEY": "test-key", "META_API_BASE": "https://api.meta.ai/v1"}
         oversized = FakeResponse(b"x" * (meta_client.MAX_RESPONSE_BYTES + 1))
-        with patch.dict(os.environ, env, clear=True), patch("meta_client.urllib.request.urlopen", return_value=oversized):
+        with patch.dict(os.environ, env, clear=True), patch("meta_client._open_request", return_value=oversized):
             with self.assertRaises(meta_client.MetaAPIError) as caught:
                 meta_client.chat([])
         self.assertEqual(caught.exception.status, 502)
         self.assertIn("size limit", str(caught.exception))
 
     def test_missing_key_fails_before_any_network_call(self):
-        with patch.dict(os.environ, {}, clear=True), patch("meta_client.urllib.request.urlopen") as urlopen:
+        with patch.dict(os.environ, {}, clear=True), patch("meta_client._open_request") as opener:
             with self.assertRaises(meta_client.MetaAPIError) as caught:
                 meta_client.chat([])
         self.assertEqual(caught.exception.status, 401)
-        urlopen.assert_not_called()
+        opener.assert_not_called()
 
 
 if __name__ == "__main__":

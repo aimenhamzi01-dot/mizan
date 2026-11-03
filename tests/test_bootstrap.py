@@ -75,7 +75,7 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn("MIZAN_JUDGE_TOKEN=" + expected, content)
         self.assertIn("MIZAN_ENCRYPTION_KEY=" + expected_key, content)
         self.assertIn("MODEL_API_KEY=my-own-key", content)
-        self.assertIn("COMPOSE_PROJECT_NAME=mizan-", content)
+        self.assertIn("COMPOSE_PROJECT_NAME=mizan\n", content)
 
     def test_weak_token_is_replaced_without_losing_other_settings(self):
         env_path = self.root / ".env"

@@ -102,7 +102,7 @@ curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports/CASE_ID/analyze \
   -H 'Content-Type: application/json' -d '{"confirm_egress":true}'
 ```
 
-The selected report and source snippet are sent to the configured `META_API_BASE`. The analysis stores a model recommendation and never sets a human disposition. Saving a report alone is always local-only. The response includes `analysis_meta` with the resolved model identifier (when supplied by the provider), prompt version and SHA-256 of the prompt template, elapsed milliseconds, and allowlisted token counts when available. It does not include the prompt content or API key.
+The selected report and source snippet are sent to the configured `META_API_BASE`. Remote endpoints must use HTTPS; redirects are rejected, so configure the final trusted endpoint URL directly. The analysis stores a model recommendation and never sets a human disposition. Saving a report alone is always local-only. The response includes `analysis_meta` with the resolved model identifier (when supplied by the provider), prompt version and SHA-256 of the prompt template, elapsed milliseconds, and allowlisted token counts when available. It does not include the prompt content or API key.
 
 An optional second-pass challenge costs at least one additional model request. It must be explicitly authorized in both the request and the UI:
 
@@ -177,5 +177,6 @@ Case deletion requires admin role in the relevant workspace (or the installation
 - `GET /api/metrics` — counts scoped to the active workspace.
 - Missing/invalid credentials return 401; insufficient role returns 403; unknown/out-of-scope cases return 404.
 - If no owner token or provisioned users are available, API access fails closed with HTTP 503.
-- Request bodies are capped at 2 MiB; unsupported content types, oversized input, invalid decisions, and workflow errors return sanitized 4xx responses.
+- Request bodies are capped at 2 MiB; unsupported content types, oversized input, invalid decisions, and workflow errors return sanitized 4xx responses. Provider failures return a sanitized 502; a timeout returns 504 and provider usage may still have occurred. Mizan does not automatically retry a timed-out analysis.
+- Missing or malformed fields in a model response, or unverifiable evidence quotes, downgrade the suggested decision to `need-info`; a successful HTTP response is not proof of a correct assessment.
 - Provider error bodies and secrets are not returned to the browser.
