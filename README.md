@@ -120,6 +120,115 @@ Mizan      = evidence checks and workflow guardrails
 Reviewer   = final security decision
 ```
 
+## Capability map
+
+### Structured vulnerability triage
+
+Mizan converts a raw security report into a structured case. Muse Spark extracts the claim, affected component, impact, reproduction steps, severity reasoning, missing context, evidence relationships, and a proposed disposition: `accept`, `reject`, `duplicate`, or `need-info`.
+
+The response is requested through strict JSON Schema output, then normalized and checked by the server before it reaches the reviewer. Mizan is designed to make a recommendation inspectable—not to hide uncertainty behind a polished paragraph.
+
+### Independent evidence verification
+
+Every model-supplied citation is checked independently against the exact report or source snippet supplied to Mizan. The server computes:
+
+- The evidence source: `report` or `code`.
+- The first matching offset.
+- The end offset.
+- The exact occurrence count.
+- Whether the excerpt is ambiguous because it appears more than once.
+- Whether the quote is structurally valid and literally present.
+
+Fabricated, missing, malformed, or wrong-source citations cannot support a confident recommendation. Mizan downgrades the recommendation to `need-info` and tells the reviewer what needs inspection.
+
+### Prompt-injection-aware analysis
+
+Security reports are untrusted input. They may contain text such as “ignore previous instructions,” fake system messages, or instructions designed to influence an AI reviewer. Mizan keeps developer instructions separate from report and code data, JSON-quotes untrusted values, and treats instruction-like text as evidence to analyze—not commands to follow.
+
+This gives the reviewer a visible answer to a critical question: **did the model analyze the report, or did the report manipulate the model?**
+
+### Fail-closed decision guardrails
+
+Mizan prefers a visible request for more information over an unsupported security verdict. Server-side guardrails route a case toward `need-info` when:
+
+- Evidence is missing or cannot be matched exactly.
+- The model response is incomplete or violates the expected schema.
+- Supplied code contradicts the claim.
+- The report is classified as scanner noise.
+- A model recommends acceptance without the required evidence.
+- An optional challenge pass flags a verified concern.
+
+These are workflow guardrails, not claims of automatic exploit verification. They are designed to reduce confident mistakes and keep the reviewer's attention on the actual evidence.
+
+### Human-owned decisions and audit history
+
+Mizan deliberately stores four different things separately:
+
+1. The original report and supplied code.
+2. The Muse Spark analysis and recommendation.
+3. The authenticated reviewer's final disposition.
+4. The chronological audit events that explain what happened.
+
+A reviewer can accept, reject, request more information, mark a duplicate, or revise a previous decision. The authenticated actor, role, timestamp, notes, and history remain visible. The model advises; the researcher owns the outcome.
+
+### Bilingual security review
+
+Mizan includes English and Arabic synthetic workflows and supports Arabic response generation in the same evidence-led pipeline. The language of the case is retained with the report, evidence, missing-context signals, and draft response so that multilingual review does not require abandoning provenance.
+
+### Safe local code analysis
+
+Mizan includes bounded deterministic static-analysis hints for source already attached to a case. These hints are deliberately review leads rather than security verdicts. Submitted source is never imported or executed, no subprocess is launched for the local Mizan rules, no dependencies are fetched, and no reported target is contacted.
+
+### Phantom evidence worker
+
+The optional [Phantom](https://github.com/aimenhamzi01-dot/phantom) integration extends Mizan from report review into a complete evidence loop. Phantom can perform an authorized, bounded collection pass and optionally run Semgrep against an authorized source URL. It returns structured evidence with:
+
+- Analysis status and engine name.
+- Selected Semgrep configuration.
+- Source byte count and lines of code.
+- SHA-256 source provenance.
+- Rule IDs, line ranges, snippets, CWE/OWASP metadata, and confidence fields.
+- A versioned `phantom-scan-result-v1` contract.
+
+Mizan imports the result as reviewable evidence. Phantom findings do not become automatic verdicts, and the imported result remains subject to Mizan's provenance checks and human disposition.
+
+### Secure team workspaces
+
+Mizan supports a practical team workflow with:
+
+- Isolated workspaces.
+- `admin`, `analyst`, `reviewer`, and `viewer` roles.
+- Server-side permission enforcement on every protected route.
+- Workspace-scoped case lists, metrics, details, and history.
+- Individual high-entropy bearer tokens.
+- Immediate token rotation and revocation.
+- Authenticated reviewer identity that cannot be spoofed through request data.
+
+The browser is only a client. The server derives identity, role, and workspace from the authenticated token.
+
+### Researcher-owned Meta keys
+
+Each researcher can use an authorized Meta Model API key owned by them. Mizan encrypts saved keys at rest with AES-GCM, associates them with the user identity, never returns them to the browser, and uses them only for that researcher's explicitly confirmed analysis.
+
+Saving a report is local. Sending report content or source code to Meta requires an explicit analysis action and explicit egress confirmation.
+
+### Provenance and versioned contracts
+
+Mizan records enough metadata to answer “where did this recommendation come from?” Depending on the workflow, the case can expose the model identifier, prompt/schema fingerprint, reasoning setting, token usage, elapsed time, evidence source, offsets, occurrence counts, Phantom task ID, analysis engine, Semgrep configuration, and source fingerprint.
+
+The Mizan–Phantom boundary is described by shared, versioned JSON Schemas:
+
+- [`mizan-phantom-task-v1`](schemas/mizan-phantom-task-v1.schema.json)
+- [`phantom-scan-result-v1`](schemas/phantom-scan-result-v1.schema.json)
+
+### Offline-first judge experience
+
+The core story works without a provider key, target access, or external account. Built-in synthetic cases demonstrate IDOR evidence, prompt injection, scanner noise, contradictory code, exact quote matching, missing context, human review, and audit history. This lets a judge experience the product before configuring live model access.
+
+### Operational readiness
+
+Mizan ships with a one-command launcher, Python-only mode, Docker Compose support, health checks, CI, bounded request sizes, sanitized errors, local SQLite persistence, non-root container execution, a read-only container filesystem, dropped Linux capabilities, and a clear separation between offline demo data and live provider egress.
+
 ## Run the judge demo
 
 The fastest way to experience Mizan is the offline workflow. It needs no provider key and makes no target connection.
