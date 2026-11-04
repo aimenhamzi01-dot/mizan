@@ -6,7 +6,7 @@
 
 ### Evidence-led security triage. Human judgment stays in control.
 
-A self-hosted workbench that helps security researchers review vulnerability reports, inspect source-linked evidence, and record a human decision—without executing submitted code or contacting reported targets.
+A self-hosted AI workbench that helps security researchers turn noisy vulnerability reports into structured, evidence-linked review decisions.
 
 [![Tests](https://github.com/aimenhamzi01-dot/mizan/actions/workflows/tests.yml/badge.svg)](https://github.com/aimenhamzi01-dot/mizan/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2f6f62.svg)](LICENSE)
@@ -14,97 +14,102 @@ A self-hosted workbench that helps security researchers review vulnerability rep
 
 **Built for the [Meta Global AI Developer Hackathon 2026](https://dev.meta.ai/events/global-hackathon)** · Indie Developer Track · *Build for Your World*
 
-<a href="https://youtu.be/HWmw2o5sIv4"><img src="assets/mizan-demo-preview.png" alt="Mizan evidence trail showing source-labelled report and code excerpts, missing context, and the human disposition panel" width="920"></a>
+<a href="https://youtu.be/HWmw2o5sIv4"><img src="assets/mizan-demo-preview.png" alt="Mizan evidence-linked security triage workbench" width="920"></a>
 
-[▶ Watch the 3-minute live demo](https://youtu.be/HWmw2o5sIv4) · [Download the 60-second preview MP4](assets/Mizan-Hackathon-Demo.mp4) · [Explore the source](https://github.com/aimenhamzi01-dot/mizan)
+[▶ Watch the live demo](https://youtu.be/HWmw2o5sIv4) · [Download the preview MP4](assets/Mizan-Hackathon-Demo.mp4) · [Explore the source](https://github.com/aimenhamzi01-dot/mizan)
 
 </div>
 
-> **The one-line pitch:** Mizan is an evidence-led security triage workbench that uses Meta's Muse Spark to accelerate review without letting an AI model—or a scanner—make the final security decision.
+> **The one-line pitch:** Mizan uses Meta's Muse Spark to accelerate vulnerability-report triage while keeping evidence inspection and the final security decision in human hands.
 
-### Why this belongs in the hackathon
+## Why Mizan
 
-Mizan turns a real practitioner problem into a working product: separating useful vulnerability evidence from noisy, incomplete, or adversarial submissions. It fits **Build for Your World** because it is built from firsthand security-review work, and it **Pushes the Frontier** by treating model output as a reviewable claim with provenance rather than as an answer to trust.
+Security researchers spend valuable time sorting actionable findings from scanner noise, incomplete claims, and reports that contain instructions aimed at manipulating an AI reviewer. Mizan turns that workflow into a focused review surface built around evidence, provenance, and accountability.
 
-**Judge-ready highlights:**
+Mizan was built from firsthand security-review experience. Its goal is not to replace the researcher. Its goal is to help the researcher reach a better-informed decision faster.
 
-- **Visible model value:** Muse Spark produces a structured triage assessment, identifies prompt-injection attempts, and proposes what a reviewer should inspect next.
-- **A concrete safety contribution:** Mizan independently checks quoted report/code excerpts, labels their source and occurrence count, and fails closed to `need-info` when evidence is incomplete or unverifiable.
-- **Human accountability by design:** the model recommendation and the authenticated reviewer's disposition are separate records; no model output closes a case or triggers an external action.
-- **A complete product loop:** local case intake, Meta analysis with explicit consent, evidence inspection, optional challenge pass, audit trail, and a subordinate Phantom handoff all work in one self-hosted workbench.
+## What makes Mizan different
+
+- **Evidence-linked analysis:** Muse Spark returns a structured assessment with source-labelled excerpts from the report and supplied code.
+- **Server-verified citations:** Mizan independently checks whether each quoted excerpt exists in its stated source, calculates its location and occurrence count, and highlights it for review.
+- **Prompt-injection awareness:** Report content is handled as untrusted data, so instruction-like text inside a submission is treated as evidence to inspect rather than as a command to follow.
+- **Fail-closed review:** Missing evidence, incomplete model output, contradictory code, or unverifiable citations are routed toward `need-info` instead of being presented as a confident acceptance.
+- **Human accountability:** The model recommendation and the authenticated reviewer's final disposition are separate records with an auditable history.
+- **Research-team workflow:** Workspaces, role-based access, encrypted researcher API keys, local case intake, review metrics, and optional second-look analysis work together in one product.
+
+## How Mizan uses Meta Muse Spark
+
+Mizan uses the Meta Model API with Muse Spark's structured JSON Schema output for security triage. The model can:
+
+1. Extract the reported vulnerability claim, component, impact, and reproduction steps.
+2. Identify prompt-injection attempts and scanner-style noise.
+3. Assess whether the supplied code supports, contradicts, or leaves the claim unverified.
+4. Return source-labelled evidence, missing context, severity reasoning, and a proposed disposition.
+5. Run an optional cross-version challenge pass to look for contradictions and missing assumptions.
+
+Mizan then applies independent server-side checks to the model response. The model is an advisor; the reviewer remains the decision maker.
+
+## Judge-ready walkthrough
+
+The included synthetic demo is designed to be reproducible locally without a provider key or external network call:
+
+1. Start Mizan and sign in with the installation-owner token.
+2. Load the built-in IDOR evidence trail.
+3. Inspect the report, supplied code, source-labelled excerpts, and missing context.
+4. Load the prompt-injection example and see how untrusted instructions remain inside the report boundary.
+5. Record a human disposition and inspect the authenticated audit event.
+
+For the strongest live demonstration, add an authorized Meta API key, select a synthetic case, choose **Analyze with Meta**, and confirm the data transfer. The UI exposes the structured assessment, model metadata, evidence matches, and human-review workflow.
+
+### Suggested three-minute demo flow
+
+- **0:00–0:25 — The problem:** show a noisy vulnerability report containing instruction-like text.
+- **0:25–1:20 — Meta reasoning:** run the case through Muse Spark and show the structured claim, injection warning, and evidence excerpts.
+- **1:20–2:05 — Evidence inspection:** show source matching, occurrence counts, and missing-context signals.
+- **2:05–2:35 — Human control:** record the reviewer's disposition and open the audit history.
+- **2:35–3:00 — Product workflow:** show workspaces, roles, and the optional Phantom result handoff.
+
+## Workflow at a glance
 
 ```text
 Untrusted report + supplied code
               ↓
        Mizan + Muse Spark
               ↓
- Evidence matching + missing-context checks
+ Evidence matching + context review
               ↓
      Human reviewer decision
               ↓
       Auditable disposition
 ```
 
-## The problem Mizan takes on
+1. **Receive:** save a report and optional source snippet locally.
+2. **Analyze:** explicitly authorize sending the selected case to the configured Meta endpoint.
+3. **Inspect:** review the structured assessment, source-labelled evidence, and missing context.
+4. **Challenge:** optionally authorize a second-look pass.
+5. **Decide:** record or revise the human disposition with an authenticated audit event.
 
-Security teams spend time sorting actionable vulnerability reports from scanner output, incomplete claims, and AI-generated noise. Reports can also contain prompt-injection text aimed at manipulating an AI reviewer. Mizan gives researchers a structured place to assess those reports while keeping the model advisory and the final disposition explicitly human-owned.
+## Technical highlights
 
-## Why I built Mizan
+- Meta Model API integration with Muse Spark model routing and strict JSON Schema output.
+- Bilingual synthetic demo coverage in English and Arabic.
+- Exact source-quote matching with offsets and repeated-occurrence detection.
+- Prompt-injection-safe separation of developer instructions from report and code data.
+- Workspace isolation and server-side role enforcement.
+- AES-GCM encryption for researcher-supplied Meta API keys.
+- Local deterministic static-analysis hints that never execute submitted code.
+- Optional editable import of a completed Phantom `ScanResult` as an unverified draft.
+- Docker deployment, health checks, CI, and a standard-library HTTP server.
 
-I'm Aimen Hamzi, a cybersecurity engineer and vulnerability researcher who submits reports to programs such as Google Bug Hunters, Apple Security Bounty, and Meta Bug Bounty, as well as programs hosted on HackerOne and Bugcrowd. Since March 2026, my day-to-day experience has included longer triage waits and a growing share of low-signal submissions—scanner output, incomplete reports, and AI-generated noise. When these reports accumulate, they can consume reviewer attention needed for well-supported findings. This is my firsthand practitioner perspective, not an audited or industry-wide measurement.
+## Validation
 
-One concrete example is Google's October 1, 2026 notice: it temporarily paused product-vulnerability submissions to OSS VRP after a rise in automated submissions, the vast majority of which Google said were invalid. Supply-chain and already-submitted reports were unaffected; this was a pause of one report category, not a closure of the entire program. [Google's official notice](https://x.com/GoogleVRP/status/2105689195180179605) · [The Hacker News coverage](https://thehackernews.com/2026/10/google-pauses-oss-product-bug-bounty.html).
-
-My name appears on the Google Bug Hunters leaderboard, and Apple has acknowledged my security research. That experience led me to build Mizan as a practical counterweight: not an automated decision-maker, but an evidence-led workbench that helps reviewers inspect a claim, trace quoted excerpts to supplied material, identify missing context, and record a human decision.
-
-*Mizan* means “balance” in Arabic. The name reflects the goal: balance the speed of AI assistance with evidence, researcher judgment, and accountability.
-
-## A quick judge walkthrough
-
-You can explore the workbench without a Meta API key or a model call:
-
-1. Start the local installation using the [quick-start steps](#run-mizan-locally).
-2. Sign in with the installation-owner token printed during first-run setup.
-3. Load the built-in **IDOR evidence trail** example. The case is synthetic; loading it stays local and does not send it to Meta.
-4. Inspect the report and code excerpts, the server-verified text matches, and the context still requiring review.
-5. See how a reviewer records a disposition separately from the model's suggestion.
-
-Live Muse Spark analysis is optional. It requires a researcher's own Meta API key and an explicit confirmation before case content is sent to the configured endpoint.
-
-### Suggested 3-minute demo flow
-
-1. **0:00–0:25 — The problem:** open the synthetic IDOR evidence trail and show the noisy report, quoted code, and the prompt-injection text that must not control the reviewer.
-2. **0:25–1:20 — Meta reasoning:** run the case through Muse Spark with explicit egress consent. Show the structured claim, severity suggestion, injection warning, and source-labelled excerpts.
-3. **1:20–2:05 — The trust boundary:** show Mizan's literal quote matching, occurrence counts, missing-context flags, and the fail-closed `need-info` outcome. Emphasize that a text match does not prove exploitability.
-4. **2:05–2:35 — Human control:** change or confirm the proposed disposition and show the authenticated audit event. The model recommends; the human decides.
-5. **2:35–3:00 — Product scope:** briefly show the signed Mizan-to-Phantom handoff and the final import preview, then return to Mizan as the single decision plane.
-
-The built-in demo is intentionally synthetic and local-first, so judges can reproduce the core workflow without a provider key. Live Meta analysis is an optional second pass, not a prerequisite for evaluating the safety model.
-
-## What makes Mizan different
-
-- **Evidence that can be checked.** The model returns report or code excerpts with source labels. Mizan checks each quote against the stated input and calculates its location and occurrence count so a reviewer can return to the original text. Any incomplete response schema or unverified quote is downgraded to `need-info` for human review.
-- **Human decision, not auto-triage.** The model's proposed outcome is kept separate from the reviewer's recorded disposition. Recommendations do not close reports or trigger external actions.
-- **A deliberate second look.** An optional cross-version Muse Spark challenge asks for concrete contradictions, assumptions, or missing context. It requires separate consent and an extra model call; using another version of the same model family is not independent verification.
-- **A safer analysis boundary.** Report and code are treated as untrusted data. Mizan does not execute submitted code, exploit vulnerabilities, or contact a target.
-- **Mizan-led Phantom handoff.** Mizan remains the primary workbench and decision plane; Phantom is a subordinate scanner. Analysts can load a completed Phantom ScanResult JSON file into an editable Mizan draft. The import does not launch Phantom, contact a target, fetch source, execute code, or call Meta. Phantom findings and its `verified` flags remain unverified claims.
-- **Research-team control.** Mizan is self-hosted, supports workspace-scoped roles, and lets each researcher use their own encrypted-at-rest Meta API key and pay for their own model usage.
-
-## How Mizan uses Meta models
-
-Mizan uses Meta Model API Chat Completions with Muse Spark's native strict JSON Schema output for both triage and the optional challenge. The model returns typed fields for the claim, injection attempts, code assessment, evidence excerpts, severity, disposition, and draft reply instead of unconstrained prose. Mizan uses high reasoning by default for security triage; operators can lower `META_REASONING_EFFORT` to reduce latency and token usage. The request leaves temperature at Meta's Muse Spark default. See Meta's [Structured Output](https://dev.meta.ai/docs/structured-output), [Reasoning](https://dev.meta.ai/docs/reasoning), and [Chat Completions](https://ai.developer.meta.com/docs/features/chat-completion/) documentation.
-
-The default model order is `muse-spark-1.3`, `muse-spark-1.2`, then `muse-spark-1.1`. An opted-in challenge uses a configured Muse Spark version different from the resolved primary model when one is available; by default it tries 1.2 then 1.1. The challenge is still advisory and is **not independent verification**. Both calls require explicit egress consent, and the additional call can incur provider usage and charges.
-
-Structured generation constrains the response shape, not its truth. The server independently checks the literal presence and source attribution of each quote and applies fail-closed rules; any incomplete schema or unverifiable quote downgrades the suggestion to `need-info`. A text match does not prove that a quote is relevant, complete, true, reachable, or sufficient to establish exploitability. Mizan records the resolved model, reasoning effort, requested output format, prompt/schema fingerprint, elapsed time, and token usage when supplied by the API.
-
-### What Mizan deliberately does not claim
-
-Mizan is not an autonomous vulnerability validator, an exploit generator, or a replacement for a security reviewer. It does not claim that a citation match proves exploitability, that a model-generated severity is ground truth, or that Phantom's `verified` field is independent confirmation. Those limits are part of the product: they make the system's uncertainty visible and keep the decision accountable.
+- **128 automated tests passing** across triage, evidence integrity, prompt-injection boundaries, authentication, role enforcement, workspace isolation, encrypted key storage, API behavior, persistence, and safe error handling.
+- **6 bilingual synthetic evaluation cases** covering supported claims, contradictory code, missing context, prompt injection, scanner noise, and citation integrity.
+- Offline evaluation runs without model calls, provider credentials, or target connections.
 
 ## Run Mizan locally
 
-**Requirements:** Docker Engine and Docker Compose v2. Python-only operation is also available; see [Python setup](#python-only-setup).
+### Docker Compose
 
 ```bash
 git clone https://github.com/aimenhamzi01-dot/mizan.git
@@ -112,23 +117,9 @@ cd mizan
 python3 scripts/run.py
 ```
 
-On first run, the bootstrap creates a private `.env`, prints the installation-owner token once, and starts the app. Open <http://127.0.0.1:8000> and sign in with that token. The owner can create workspaces and issue individual researcher tokens from **Workspace administration**.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000) and sign in with the installation-owner token printed during first-run setup.
 
-The app binds to loopback by default. `docker compose down` preserves the database volume; `docker compose down -v` deletes it. Do not share the owner token: it grants global administrative access.
-
-### Enable live Muse Spark analysis
-
-Live use requires a Meta Model API key that the researcher is authorized to use; Mizan does not issue or share keys. Obtain provider access through the [Meta developer platform](https://dev.meta.ai/), sign in to Mizan, and save the key under **Your Meta API key**. Saving a key does not test it or send data. To perform a live test, save a built-in synthetic report, select it, choose **Analyze with Meta**, and confirm the data transfer. Each researcher is responsible for provider usage and any charges. The optional challenge pass makes an additional model request.
-
-The default endpoint is `https://api.meta.ai/v1`. Remote endpoints must use HTTPS; Mizan does not follow redirects, so configure the final trusted API URL directly. Cleartext HTTP is allowed only for loopback development endpoints. A saved key is not proof that the provider account, model access, or billing is active; the first explicit analysis is the connectivity check.
-
-### Bring a completed Phantom scan into Mizan
-
-Mizan is the primary workbench; Phantom is an optional subordinate scanner. Select a saved Phantom `ScanResult` JSON file in **New report** and choose **Load editable draft from Phantom JSON**. Mizan previews a whitelisted subset of the result in the report field; review and edit it before choosing **Save report locally**. Any source excerpt emitted by Phantom stays in the report as an unverified claim. Only code separately supplied by the researcher goes into Mizan's source-code field.
-
-This is a data handoff, not live orchestration: it does not start a Phantom scan, retrieve a target, or apply a fix. The preview is not saved until the researcher submits the ordinary local-save form, and model analysis still requires the usual explicit egress confirmation. Mizan does not treat Phantom's `verified` flag, CVSS, severity, or generated remediation as ground truth; it does not import Phantom's network reconnaissance details, bounty estimates, or program matches.
-
-### Python-only setup
+### Python-only mode
 
 ```bash
 python3 -m pip install -r requirements.txt
@@ -136,72 +127,18 @@ python3 scripts/bootstrap.py
 python3 server.py
 ```
 
-Python mode also binds to loopback by default and stores data at `data/mizan.sqlite3`. Do not bind it to an untrusted network.
-
-## Workflow at a glance
-
-1. **Receive:** Save a report and optional code locally. Saving a case does not call a model.
-2. **Analyze:** A researcher confirms whether the selected case may be sent to the configured Meta endpoint.
-3. **Inspect:** Review the model's structured assessment, source-labelled excerpts, citation matches, and missing context.
-4. **Challenge (optional):** Authorize a second model request to look for specific weaknesses in the first assessment.
-5. **Decide:** A human reviewer records or revises the disposition. The audit trail identifies the authenticated actor.
-
-## Workspaces and roles
-
-| Role | Scope and capabilities |
-|---|---|
-| Installation owner | Global administration; create workspaces and manage all users |
-| Workspace admin | Manage members and issue analyst, reviewer, or viewer tokens within one workspace |
-| Analyst | Read workspace cases, submit reports, and request analysis |
-| Reviewer | Read cases and record or revise human dispositions |
-| Viewer | Read workspace cases only |
-
-Case visibility is workspace-scoped, not per-case ownership. Workspace admins cannot create other workspace admins or create workspaces. The owner token is the only global identity.
-
-## Privacy, cost, and safety boundaries
-
-- Reports, code snippets, analyses, and review history are stored in local SQLite. **The database itself is not encrypted.** Protect the host, volume, backups, and `.env` file.
-- Each researcher's Meta API key is encrypted at rest with AES-GCM. The installation encryption key remains in `.env`; back it up securely with the database.
-- Each researcher supplies and pays for their own Meta API usage. An optional `MODEL_API_KEY` fallback is limited to the installation owner.
-- Live analysis sends the selected report and code to `META_API_BASE` only after explicit consent. The optional challenge sends case content again and may incur additional charges.
-- Mizan does not execute submitted code, perform exploits, or contact reported targets.
-- Exact quote matching proves only that the quoted characters occur in the stated source. Model assessments remain advisory and require human review.
-
-Mizan is a self-hosted prototype, not a vulnerability validator or a production SaaS. It does not provide database encryption, automatic token expiry, MFA, automatic retention, or TLS termination. Review [SECURITY.md](SECURITY.md) and the [operations guide](docs/OPERATIONS.md) before enabling team access.
-
-## Evaluation and tests
-
-Run the offline checks locally:
-
-```bash
-python -m unittest discover -s tests -v
-python scripts/evaluate.py
-```
-
-The evaluation command validates a small bundled set of synthetic English and Arabic cases and makes **zero model calls by default**. An explicitly authorized live run can send only those synthetic fixtures and may incur API charges. The harness reports regression metrics; it is not evidence of production accuracy. GitHub Actions runs the offline test suite, builds the container, and smoke-tests its health and authenticated API paths.
-
-## Technical map
-
-| Component | Responsibility |
-|---|---|
-| `server.py` | HTTP API, authentication, workspace RBAC, and explicit egress controls |
-| `triage.py`, `prompts.py` | Model workflow, untrusted-input boundary, normalization, and evidence checks |
-| `static_analysis.py` | Bounded local source-text heuristics; never executes code or makes network calls |
-| `meta_client.py` | Meta-compatible Model API client and response metadata |
-| `auth_store.py`, `secret_store.py` | Workspace identities, token digests, and encrypted personal model keys |
-| `review_store.py` | SQLite migrations, workspace-scoped reports, audit events, and metrics |
-| `static/index.html` | Researcher workbench and administration interface |
-| `phantom_task.py`, `phantom_import.py` | User-attested task-manifest handoff and safe Phantom result preview |
-| `scripts/bootstrap.py`, `scripts/run.py` | Private first-run setup and Docker startup |
-| `scripts/evaluate.py`, `tests/fixtures/` | Offline fixture validation and opt-in synthetic evaluation |
-| `Dockerfile`, `compose.yaml`, `tests/` | Container setup and regression coverage |
+The offline judge walkthrough works without a Meta API key. Live analysis uses the researcher's authorized Meta Model API key after explicit confirmation.
 
 ## Further reading
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [API reference](docs/API.md)
+- [Architecture and trust boundaries](docs/ARCHITECTURE.md)
 - [Evaluation protocol](docs/EVALUATION.md)
+- [API reference](docs/API.md)
 - [Operations guide](docs/OPERATIONS.md)
-- [Mizan–Phantom integration, phase 1](docs/PHANTOM_INTEGRATION.md)
-- [Security policy and limitations](SECURITY.md)
-- [MIT License](LICENSE)
+- [Security and responsible use](SECURITY.md)
+- [Phantom integration](docs/PHANTOM_INTEGRATION.md)
+- [Contributing](CONTRIBUTING.md)
+
+## License
+
+Mizan is released under the [MIT License](LICENSE).
