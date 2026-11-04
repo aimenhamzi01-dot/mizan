@@ -190,6 +190,10 @@ Example excerpt:
 
 `verified` means only that the text matches the supplied source exactly. It does not establish semantic relevance, truth, reachability, or completeness; the reviewer must inspect the surrounding code and make the final decision. The optional stateless `POST /api/triage` accepts the same `challenge_pass` and separate confirmation fields for live requests; built-in demo cases make no model calls.
 
+### Phase 2B triage intelligence
+
+Saved-report analysis also includes `triage_intelligence`. This is a deterministic review aid layered after model normalization; it makes no model calls and never changes the human disposition. It contains `classification` (`valid-finding`, `potential-finding`, `false-positive`, `informative`, or `insufficient-evidence`), evidence-aware `prioritization` with a score and factors, targeted `missing_evidence` requests, detected `contradictions`, workspace-scoped `duplicate_candidates`, and `explainability` with supporting excerpts, uncertainty, and limitations. Similarity is only a duplicate-review signal: Mizan never automatically marks a report as duplicate or rejects it from similarity alone. Scanner observations remain unconfirmed, and priority is a queue aid rather than severity ground truth.
+
 `POST /api/triage` remains available for stateless compatibility. Synthetic canned results can be requested with `{ "demo":"injection", "lang":"en" }`. A live call requires analyst/admin role, the user's own key (or owner-only fallback), and `confirm_egress: true`.
 
 ## Record a human disposition

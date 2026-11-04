@@ -383,6 +383,34 @@ def list_reports(
     ]
 
 
+def list_report_contexts(*, workspace_id: str = "default", exclude_id: str = "", limit: int = 100) -> list:
+    """Return bounded workspace-scoped text for deterministic duplicate review."""
+    init_db()
+    try:
+        limit = max(1, min(int(limit), 100))
+    except (TypeError, ValueError):
+        raise ValueError("Limit must be an integer.")
+    where = ["w.workspace_id = ?"]
+    args = [workspace_id]
+    if exclude_id:
+        where.append("r.id != ?")
+        args.append(exclude_id)
+    sql = (
+        "SELECT r.id, r.report, r.code, r.analysis_json, r.status, r.updated_at "
+        "FROM reports r JOIN report_workspaces w ON w.report_id=r.id "
+        "WHERE " + " AND ".join(where) + " ORDER BY r.updated_at DESC, r.id LIMIT ?"
+    )
+    args.append(limit)
+    with _connect() as conn:
+        rows = conn.execute(sql, args).fetchall()
+    return [
+        {"id": row["id"], "report": row["report"], "code": row["code"],
+         "analysis": json.loads(row["analysis_json"]) if row["analysis_json"] else None,
+         "status": row["status"], "updated_at": row["updated_at"]}
+        for row in rows
+    ]
+
+
 def report_history(report_id: str, *, workspace_id: str | None = None) -> list:
     init_db()
     with _connect() as conn:

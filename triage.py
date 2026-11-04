@@ -5,6 +5,7 @@ import re
 import time
 
 import meta_client
+import triage_intelligence
 from prompts import (
     CHALLENGE_RESPONSE_FORMAT,
     CHALLENGE_SYSTEM,
@@ -331,7 +332,7 @@ def _run_challenge(report, code, language, analysis, api_key, primary_model="unk
         }
 
 
-def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False):
+def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False, existing_reports=None):
     report = (report or "").strip()
     if not report:
         raise ValueError("Paste the report text first.")
@@ -391,7 +392,7 @@ def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False):
                     normalized["decision"] = "need-info"
                     note = " The optional second-pass challenge raised a concern or could not reach a clear conclusion; human review is required."
                     normalized["decision_reasoning"] = (normalized["decision_reasoning"] + note).strip()[:500]
-            return normalized
+            return triage_intelligence.enrich(normalized, report, code, existing_reports)
         except (ValueError, json.JSONDecodeError) as e:
             last_err = e
             if not isinstance(reply, str):

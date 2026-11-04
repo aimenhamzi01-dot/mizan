@@ -465,6 +465,24 @@ function renderChallenge(parent,challenge){
   const meta=challenge.analysis_meta;if(meta?.model){const tokens=meta.usage?.total_tokens?` · ${meta.usage.total_tokens} tokens`:"";const format=meta.output_format==="json_schema"?"strict JSON Schema requested":"format unreported";section.append(node("p","hint",`Challenge model: ${meta.model} · ${format} · reasoning ${meta.reasoning_effort||"model default"} · ${meta.elapsed_ms||0} ms${tokens} · prompt ${meta.prompt_version||"unknown"}`));}
   parent.append(section);
 }
+function renderTriageIntelligence(parent, intelligence){
+  if(!intelligence)return;
+  const section=node("section","section");section.append(node("h3","","Phase 2B triage intelligence · review aid only"));
+  const grid=node("div","result-grid"), classification=intelligence.classification||{}, priority=intelligence.prioritization||{};
+  addField(grid,"Classification",`${classification.label||"unknown"} · not a final disposition`);
+  addField(grid,"Review priority",`${priority.band||"unknown"} · score ${priority.score??"—"}/100`);
+  addField(grid,"Human control",priority.human_review_required===false?"Not required":"Required for final decision");
+  addField(grid,"Missing evidence",(intelligence.missing_evidence||[]).map(item=>item.request).join("\n")||"No deterministic gap identified; inspect semantic sufficiency manually.",true);
+  addField(grid,"Contradictions",(intelligence.contradictions||[]).map(item=>`${item.type}: ${item.detail}`).join("\n")||"None detected by deterministic checks.",true);
+  section.append(grid);
+  const duplicates=intelligence.duplicate_candidates||[];
+  section.append(node("h4","","Possible duplicates · human confirmation required"));
+  if(!duplicates.length) section.append(node("p","hint","No candidate exceeded the similarity threshold in the available workspace context."));
+  duplicates.forEach(item=>section.append(node("p","hint",`${item.report_id||"unknown"} · ${(Number(item.similarity||0)*100).toFixed(1)}% · ${(item.reasons||[]).join("; ")}`)));
+  const limits=(intelligence.explainability||{}).limitations||[];
+  if(limits.length) section.append(node("p","hint","Limitations: "+limits.join(" ")));
+  parent.append(section);
+}
 function renderAnalysis(parent, report){
   if(!report.analysis){
     const section = node("section", "section"); section.append(node("h3", "", "Model recommendation"));
@@ -496,6 +514,7 @@ function renderAnalysis(parent, report){
     addField(grid,"Model-call time",`${meta.elapsed_ms||0} ms${tokens}`);
   }
   section.append(grid); parent.append(section);
+  renderTriageIntelligence(parent, analysis.triage_intelligence);
   renderEvidence(parent, analysis);
   renderChallenge(parent,analysis.challenge_pass);
 }

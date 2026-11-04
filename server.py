@@ -582,9 +582,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not api_key:
                     self._send(409, {"error": "Add your own encrypted Meta API key in your account profile before analysis."})
                     return
+                existing_reports = review_store.list_report_contexts(
+                    workspace_id=scope or "default", exclude_id=report_id, limit=100,
+                )
                 analysis = triage.triage(
                     saved["report"], saved["code"], saved["language"],
                     api_key=api_key, challenge_pass=challenge_pass,
+                    existing_reports=existing_reports,
                 )
                 updated = review_store.save_analysis(report_id, analysis, actor=username, workspace_id=scope, actor_user_id=actor_id)
                 self._send(200, {"report": updated})
