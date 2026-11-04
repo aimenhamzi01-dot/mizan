@@ -54,6 +54,11 @@ class Normalize(unittest.TestCase):
         d = dict(GOOD, code_verification="contradicted", decision="accept")
         self.assertEqual(triage.normalize(d, GOOD_REPORT, GOOD_CODE)["decision"], "reject")
 
+    def test_unverifiable_code_cannot_be_accepted(self):
+        d = dict(GOOD, code_verification="unverifiable", decision="accept")
+        result = triage.normalize(d, GOOD_REPORT, "")
+        self.assertEqual(result["decision"], "need-info")
+
     def test_scanner_dump_cannot_be_accepted(self):
         d = dict(GOOD, noise="scanner-dump", decision="accept")
         self.assertEqual(triage.normalize(d, GOOD_REPORT, GOOD_CODE)["decision"], "need-info")

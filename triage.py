@@ -153,6 +153,8 @@ def normalize(data, report="", code=""):
     # integrity; it does not establish semantic relevance or report truth.
     if verify == "contradicted" and decision == "accept":
         decision = "reject"
+    if verify == "unverifiable" and decision == "accept":
+        decision = "need-info"
     if noise == "scanner-dump" and decision == "accept":
         decision = "need-info"
     decision_reasoning = str(data.get("decision_reasoning", ""))[:500]
