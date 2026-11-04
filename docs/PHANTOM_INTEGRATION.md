@@ -14,7 +14,7 @@ Mizan remains the primary workbench and decision plane. Phantom is a bounded wor
 
 The manifest contains no API key, bearer token, report body, source code, or model content. Its HMAC signature detects edits but does not independently prove legal authorization. Phantom requires `PHANTOM_API_TOKEN`, rejects unsigned, expired, or tampered manifests, enforces `PHANTOM_ALLOWED_TARGETS`, rejects private/reserved IP resolutions, disables redirects, verifies TLS, and limits fetched source to 2 MB. These are defense-in-depth controls; a human must still verify authorization.
 
-Set the same high-entropy value in both services:
+Set the same high-entropy value in both services. Mizan's Compose configuration passes `MIZAN_PHANTOM_SIGNING_KEY` from its private `.env` into the application container; Phantom must receive the matching value through its own private environment:
 
 ```env
 MIZAN_PHANTOM_SIGNING_KEY=<random value, at least 32 characters>
