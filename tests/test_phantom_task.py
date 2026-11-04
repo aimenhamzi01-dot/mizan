@@ -1,9 +1,16 @@
 import unittest
+import os
+import hmac
+import hashlib
+import json
 
 import phantom_task
 
 
 class PhantomTaskTests(unittest.TestCase):
+    def setUp(self):
+        os.environ["MIZAN_PHANTOM_SIGNING_KEY"] = "test-signing-key-that-is-at-least-32-chars"
+
     def payload(self, **changes):
         value = {
             "target": "https://scope.example.org/app",
@@ -24,6 +31,14 @@ class PhantomTaskTests(unittest.TestCase):
         self.assertFalse(result["execution"]["automatic_execution"])
         self.assertFalse(result["execution"]["network_access_by_mizan"])
         self.assertEqual(result["requested_by"], "analyst")
+        self.assertEqual(result["signature_algorithm"], "HMAC-SHA256")
+        unsigned = {k: v for k, v in result.items() if k not in {"signature", "signature_algorithm"}}
+        expected = hmac.new(
+            os.environ["MIZAN_PHANTOM_SIGNING_KEY"].encode(),
+            json.dumps(unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        self.assertTrue(hmac.compare_digest(result["signature"], expected))
 
     def test_requires_explicit_authorization_attestation(self):
         with self.assertRaisesRegex(ValueError, "Confirm that you are authorized"):

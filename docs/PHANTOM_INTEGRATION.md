@@ -1,22 +1,34 @@
 # Mizan–Phantom integration
 
-Mizan remains the single primary workbench and decision plane. It now includes native, offline heuristic checks for source code already saved with a case (`POST /api/reports/{id}/static-analysis`), with findings stored alongside that case for human review. The task-manifest generator and Phantom-result preview remain a separate manual handoff; they are not a live scanner integration. The local checks are intentionally limited and do not execute code or contact targets.
+Mizan remains the primary workbench and decision plane. Phantom is a bounded worker, not an independent scanner that accepts arbitrary targets.
 
 ## Workflow
 
 1. Sign in to Mizan as a workspace admin or analyst. Open **Prepare an authorized Phantom task**.
-2. Enter the target and choose only the authorized checks. Confirm the authorization checkbox and create the manifest. Mizan downloads a JSON task file with a unique task ID and a two-hour expiry.
-3. Transfer the manifest through an approved private channel to the isolated Phantom operator. Review target and scope again before starting any scan. The current Phantom API does not yet consume or cryptographically verify Mizan task manifests; the operator must manually copy the target, target type, and scope into Phantom. Do not treat a manifest as proof of authorization.
+2. Enter the target and choose only authorized checks. Confirm the authorization checkbox and create the manifest. Mizan emits a JSON task with a unique ID, a two-hour expiry, and an HMAC-SHA256 signature.
+3. Transfer the manifest through an approved private channel to the isolated Phantom operator. Phantom verifies the signature, expiry, execution policy, target type, scope, and configured target allowlist before accepting it. Direct unsigned scans are disabled by default.
 4. Export the completed Phantom `ScanResult` as JSON. In Mizan, load it through **Import a completed Phantom result**, inspect and edit the draft, then save it as a local report. The importer treats scanner findings, severity, source excerpts, and Phantom's `verified` flag as claims.
 5. Any later Meta analysis still requires its separate explicit consent. A human reviewer records the final disposition in Mizan.
 
-## What this phase does and does not do
+## Security model and limits
 
-The manifest endpoint is authenticated and limited to analyst/admin roles. It requires an explicit user attestation and restricts the task-type and scan-category fields to bounded enumerations. It does **not** validate the target, determine whether it is in a bounty program's scope, or verify the user's authorization. The target string is carried as data without a network lookup or a connection. It creates no persistent job record and does not contact Phantom, resolve a target, execute code, or make a model call.
+The manifest contains no API key, bearer token, report body, source code, or model content. Its HMAC signature detects edits but does not independently prove legal authorization. Phantom requires `PHANTOM_API_TOKEN`, rejects unsigned, expired, or tampered manifests, enforces `PHANTOM_ALLOWED_TARGETS`, rejects private/reserved IP resolutions, disables redirects, verifies TLS, and limits fetched source to 2 MB. These are defense-in-depth controls; a human must still verify authorization.
 
-The manifest carries no API key, bearer token, report body, source code, or model content. It is a coordination file, not a signed capability: anyone who can edit the JSON can change its fields. Phantom's current `/scan/start` endpoint does not authenticate callers or enforce Mizan's authorization statement. Operate Phantom only on a private, restricted network. Before a live scanner-worker integration, add service authentication, target allowlists, DNS/IP egress enforcement (including redirect and DNS-rebinding controls), bounded worker concurrency and resource limits, persistent job/result storage, and a verified task signature or authenticated queue.
+Set the same high-entropy value in both services:
 
-This handoff does not make Phantom production-safe. The repository's exposed `.env` credentials must be revoked and rotated before using it. Do not include that `.env` in images or bundles. Keep Phantom private until its API authentication, TLS validation, target controls, and deployment exposure have been fixed.
+```env
+MIZAN_PHANTOM_SIGNING_KEY=<random value, at least 32 characters>
+```
+
+Phantom also requires:
+
+```env
+PHANTOM_API_TOKEN=<random value>
+PHANTOM_ALLOWED_TARGETS=https://authorized.example.com
+PHANTOM_ALLOW_DIRECT_SCANS=false
+```
+
+Keep Phantom private and bind Docker to loopback unless a private TLS gateway and exact allowlists are in place. Revoke and rotate any credentials that were ever committed or exposed; never include `.env` in images or bundles.
 
 ## API
 
@@ -31,4 +43,12 @@ This handoff does not make Phantom production-safe. The repository's exposed `.e
 }
 ```
 
-The response is `{ "manifest": { ... } }` with format `mizan-phantom-task-v1`, `task_id`, creation and expiry timestamps, the requesting user/workspace, an authorization attestation, and execution limits. The service role is always taken from the authenticated Mizan principal, not from the request body. Installation-owner requests default to the `default` workspace and may specify another existing workspace. The expiry is informational; Phantom does not yet enforce it.
+The response is `{ "manifest": { ... } }` with format `mizan-phantom-task-v1`, task ID, creation and expiry timestamps, the requesting user/workspace, authorization attestation, execution limits, `signature_algorithm`, and `signature`. Phantom accepts a start request only in this form:
+
+```json
+{
+  "manifest": { "format": "mizan-phantom-task-v1", "...": "signed fields" }
+}
+```
+
+Send `X-Phantom-API-Token` with the configured service token. A body containing only `{ "target": "https://arbitrary.example" }` is rejected in secure mode.

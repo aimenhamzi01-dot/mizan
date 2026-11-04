@@ -9,6 +9,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from phantom_signing import attach_signature
+
 TASK_FORMAT = "mizan-phantom-task-v1"
 ALLOWED_TYPES = {"web", "mobile", "hardware", "code"}
 ALLOWED_SCOPES = {"xss", "sqli", "ssrf", "idor", "logic", "auth", "rce", "crypto", "secrets", "misconfiguration"}
@@ -42,7 +44,7 @@ def create_manifest(payload: dict, *, requester: str, workspace_id: str) -> dict
         if normalized not in scope:
             scope.append(normalized)
     now = datetime.now(timezone.utc)
-    return {
+    manifest = {
         "format": TASK_FORMAT,
         "task_id": str(uuid.uuid4()),
         "created_at": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -65,3 +67,4 @@ def create_manifest(payload: dict, *, requester: str, workspace_id: str) -> dict
             "result_format": "phantom-scan-result-v1",
         },
     }
+    return attach_signature(manifest)
