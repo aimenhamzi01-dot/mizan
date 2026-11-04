@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/mizan-logo.png" alt="Mizan logo" width="260">
+
 # Mizan
 
 ### Evidence-led security triage. Human judgment stays in control.
