@@ -145,6 +145,7 @@ The evaluation command validates a small bundled set of synthetic English and Ar
 |---|---|
 | `server.py` | HTTP API, authentication, workspace RBAC, and explicit egress controls |
 | `triage.py`, `prompts.py` | Model workflow, untrusted-input boundary, normalization, and evidence checks |
+| `static_analysis.py` | Bounded local source-text heuristics; never executes code or makes network calls |
 | `meta_client.py` | Meta-compatible Model API client and response metadata |
 | `auth_store.py`, `secret_store.py` | Workspace identities, token digests, and encrypted personal model keys |
 | `review_store.py` | SQLite migrations, workspace-scoped reports, audit events, and metrics |

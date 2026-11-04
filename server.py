@@ -31,6 +31,7 @@ import secret_store  # noqa: E402
 import triage  # noqa: E402
 import phantom_import  # noqa: E402
 import phantom_task  # noqa: E402
+import static_analysis  # noqa: E402
 from demo_data import DEMOS, SAMPLE_INPUT  # noqa: E402
 
 MAX_BODY = 2 * 1024 * 1024
@@ -441,6 +442,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(201, {"report": saved})
                 return
             report_id, action = self._report_path(path)
+            if report_id and action == "static-analysis":
+                if not self._require_roles(ANALYZE_ROLES):
+                    return
+                language = payload.get("language", "auto")
+                saved = review_store.get_report(report_id, workspace_id=scope)
+                if saved["status"] == "reviewed":
+                    raise review_store.InvalidState("A reviewed report cannot receive new static-analysis runs; create a new report instead.")
+                if not saved["code"]:
+                    raise review_store.InvalidState("This report has no supplied source code to analyze.")
+                result = static_analysis.analyze_source(saved["code"], language=language)
+                updated = review_store.save_static_analysis(
+                    report_id, result["language"], result,
+                    actor=username, workspace_id=scope, actor_user_id=actor_id,
+                )
+                self._send(201, {"report": updated})
+                return
             if report_id and action == "analyze":
                 if not self._require_roles(ANALYZE_ROLES):
                     return

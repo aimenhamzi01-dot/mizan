@@ -1,6 +1,6 @@
-# Mizan–Phantom integration, phase 1
+# Mizan–Phantom integration
 
-Mizan remains the primary workbench and decision plane. This phase adds an analyst-controlled task-manifest generator and uses the existing Phantom-result import preview for the return trip. It is a manual handoff, not live orchestration.
+Mizan remains the single primary workbench and decision plane. It now includes native, offline heuristic checks for source code already saved with a case (`POST /api/reports/{id}/static-analysis`), with findings stored alongside that case for human review. The task-manifest generator and Phantom-result preview remain a separate manual handoff; they are not a live scanner integration. The local checks are intentionally limited and do not execute code or contact targets.
 
 ## Workflow
 

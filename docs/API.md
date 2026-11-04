@@ -93,6 +93,18 @@ curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports \
 
 The installation owner may include `workspace_id` to assign a case; an ordinary analyst cannot select another workspace. The returned case has `status: "received"`, `analysis: null`, and `review_decision: null`.
 
+## Run local static source checks
+
+An analyst or workspace admin can run bounded deterministic text-pattern checks against the source code already saved with a case:
+
+```bash
+curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports/CASE_ID/static-analysis \
+  -H 'Content-Type: application/json' \
+  -d '{"language":"python"}'
+```
+
+Supported language selectors are `auto`, `python`, `javascript`, `typescript`, `java`, `go`, `php`, `ruby`, `csharp`, and `generic`. The request invokes only local Python text-pattern checks: it does not execute or import the submitted source, make a model call, fetch dependencies, or contact a target. Results are stored as separate, workspace-scoped runs and returned in `report.static_analysis_runs`; they do not overwrite model analysis or a human disposition. The patterns are intentionally limited and can produce false positives or miss issues. Every finding is marked unverified, and no findings do not establish that code is secure.
+
 ## Preview a saved Phantom result
 
 Mizan is the primary workbench; Phantom is a subordinate scanner. An analyst or administrator can submit a previously saved Phantom `ScanResult` JSON object to the protected preview route:
@@ -205,6 +217,7 @@ Case deletion requires admin role in the relevant workspace (or the installation
 - `GET /api/sample?kind=injection|valid|noise&lang=en|ar` — synthetic sample input (any authenticated role).
 - `GET /api/reports` — bounded workspace-scoped summaries with `status`, `q`, `limit`, and `offset` filters.
 - `GET /api/reports/{id}` and `/history` — workspace-scoped detail and events.
+- `POST /api/reports/{id}/static-analysis` — run local source-text heuristics on saved code (analyst/admin only; no network or code execution).
 - `GET /api/metrics` — counts scoped to the active workspace.
 - Missing/invalid credentials return 401; insufficient role returns 403; unknown/out-of-scope cases return 404.
 - If no owner token or provisioned users are available, API access fails closed with HTTP 503.

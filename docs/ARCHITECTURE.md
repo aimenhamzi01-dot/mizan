@@ -6,12 +6,13 @@ Mizan is a self-hosted, human-led security-report triage workbench. A single ope
 
 ## Components
 
-- **Browser UI (`static/index.html`)** — personal-token gate, workspace case queue, profile for the researcher's provider key, explicit model-egress confirmation, source-linked evidence highlights, an optional separately confirmed challenge pass, human review, workspace-member administration, and an editable preview for a saved Phantom result. The bearer token is held in memory only. Values are rendered as DOM text, not interpreted as HTML.
+- **Browser UI (`static/index.html`)** — personal-token gate, workspace case queue, profile for the researcher's provider key, explicit model-egress confirmation, source-linked evidence highlights, local static-check controls, an optional separately confirmed challenge pass, human review, workspace-member administration, and an editable preview for a saved Phantom result. The bearer token is held in memory only. Values are rendered as DOM text, not interpreted as HTML.
 - **HTTP server (`server.py`)** — validates local or explicitly allow-listed Host/Origin; authenticates the installation-owner token or an individual token; enforces role checks and workspace scope on every route; validates request sizes and JSON; and returns sanitized errors. It does not trust `X-Forwarded-*` headers.
 - **Identity store (`auth_store.py`)** — creates workspaces, users, high-entropy tokens, role assignments, revocation, and token rotation. SQLite stores only SHA-256 token digests; bearer tokens are returned once.
-- **Case store (`review_store.py`)** — versioned SQLite schema. Each report maps to one workspace. Existing records migrate into `default`. Event history records authenticated actor ids and names. Queries for non-owner principals include workspace scope.
+- **Case store (`review_store.py`)** — versioned SQLite schema. Each report maps to one workspace. Existing records migrate into `default`. Event history records authenticated actor ids and names; separate static-analysis runs retain the result, source hash, language, timestamp, and authenticated actor. Queries for non-owner principals include workspace scope.
 - **Secret store (`secret_store.py`)** — encrypts each user's Meta API key with AES-256-GCM and user-id associated data. The master 32-byte key is supplied through private `MIZAN_ENCRYPTION_KEY`, never through the browser.
 - **Triage (`triage.py`, `prompts.py`)** — issues the primary model call only after explicit user action and server confirmation. User report/code remain separate from developer instructions, are JSON-quoted, and use strict Meta JSON Schema output before local normalization and hard acceptance guardrails. The optional challenge is a separately confirmed advisory pass routed to a different configured Muse Spark version when available; its source quotations are also checked server-side.
+- **Local static analysis (`static_analysis.py`)** — applies bounded deterministic text patterns to source already saved with a case. It never imports or executes code, starts a subprocess, fetches rules/dependencies, or makes network/model calls. Findings are heuristic review leads, stored separately from model suggestions and human decisions.
 - **Phantom import (`phantom_import.py`)** — a pure, bounded mapper for user-selected completed Phantom `ScanResult` JSON. It returns an editable preview only; it does not call Phantom, contact targets, retrieve source, execute code, call a model, or persist a case. Phantom claims stay unverified, and only separately researcher-supplied code enters the code field.
 - **Model client (`meta_client.py`)** — sends messages to the configured Meta-compatible endpoint using the authenticated user's key, Muse Spark's default temperature, configurable reasoning effort (high by default), strict output schemas, model fallbacks, and allowlisted model/token-usage metadata. Only the installation owner may use the legacy environment-key fallback.
 - **Container (`Dockerfile`, `compose.yaml`)** — runs non-root with a read-only root filesystem, dropped capabilities, persistent SQLite volume, and a loopback-only host port by default.
@@ -42,6 +43,14 @@ sequenceDiagram
     UI->>API: Protected request with Authorization header
     API->>Auth: Validate token digest, role, workspace
     Auth-->>API: Authenticated principal
+    opt Researcher runs local text-pattern checks
+        Researcher->>UI: Select language and run local checks
+        UI->>API: POST /api/reports/{id}/static-analysis
+        API->>DB: Read saved source within workspace
+        API->>API: Match bounded local rules against inert text
+        API->>DB: Save findings, source hash and authenticated actor
+        Note over API,Model: No code execution, model call, or network access
+    end
     opt User previews a saved Phantom result
         Researcher->>Phantom: Run an authorized scan separately
         Phantom-->>Researcher: Saved ScanResult JSON
@@ -78,7 +87,7 @@ sequenceDiagram
     API->>DB: Store human decision and authenticated actor
 ```
 
-Phantom is a separate subordinate scanner, not a Mizan runtime dependency. The current handoff is user-selected JSON only: Mizan does not invoke Phantom or contact targets. Within Mizan, the only application egress is the configured model endpoint, and it occurs only after explicit confirmation. The reviewed Phantom implementation generates findings and remediation advice; it does not itself apply fixes or enforce controls.
+Phantom's result importer remains a bounded manual preview; Mizan does not invoke Phantom or contact targets. The local pattern checks are native to Mizan but intentionally much narrower than Phantom's scanner. Within Mizan, the only application egress is the configured model endpoint, and it occurs only after explicit confirmation. The imported Phantom implementation generates findings and remediation advice; it does not itself apply fixes or enforce controls.
 
 For each verified quote, the server computes the first source offset, end offset, and occurrence count. The UI can jump to and highlight the first match; repeated excerpts are visibly marked ambiguous. This establishes literal presence only, not semantic relevance or truth. Prompt hashes include the JSON Schema contract and identify instruction/schema versions without storing prompt contents in metadata. The optional second pass uses the same configured endpoint but a different model version where possible; it remains within the Muse Spark family and is not independent verification. A concern, inconclusive result, or invalid challenge citation downgrades the model suggestion to `need-info`, never the human disposition.
 
@@ -98,11 +107,11 @@ stateDiagram-v2
 
 ## Storage and migrations
 
-Schema version 2 adds workspaces, users, token digests, report-to-workspace mappings, encrypted personal API keys, and actor ids in the event table. Existing reports are assigned to `default` during migration. Case text and event details remain plaintext; only provider API keys are encrypted. The installation key must be backed up with the database. Losing it prevents decryption of saved provider keys.
+Schema version 2 adds workspaces, users, token digests, report-to-workspace mappings, encrypted personal API keys, and actor ids in the event table. Schema version 3 adds workspace-scoped static-analysis run records. Existing reports are assigned to `default` during migration. Case text, analysis findings, and event details remain plaintext; only provider API keys are encrypted. The installation key must be backed up with the database. Losing it prevents decryption of saved provider keys.
 
 ## Trust boundaries and limitations
 
-1. **Browser input is untrusted.** Reports and code are length-limited text; they are never imported or executed.
+1. **Browser input is untrusted.** Reports and code are length-limited text; submitted source is never imported or executed. Static rules only inspect bounded lines of text and can report false positives or miss issues.
 2. **The token determines identity.** Request-supplied workspace ids are ignored for ordinary users; audit actor identities come from authentication, not client text.
 3. **The workspace is the sharing boundary.** All members in a workspace can read all cases there. The installation owner can read all workspaces. The host operator can access SQLite and `.env`.
 4. **Report storage is plaintext.** Backups, host access, and volume permissions require operator controls.

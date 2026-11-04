@@ -399,6 +399,28 @@ function renderAnalysis(parent, report){
   renderEvidence(parent, analysis);
   renderChallenge(parent,analysis.challenge_pass);
 }
+function renderStaticAnalysis(parent, report){
+  const section=node("section","section");section.append(node("h3","","Local source-code checks · heuristic only"));
+  section.append(node("p","hint","Checks the source already saved with this case. The code is treated as inert text: it is not executed, imported, sent to a model, or sent over the network. Pattern matches need human verification; no matches do not prove the code is secure."));
+  const runs=Array.isArray(report.static_analysis_runs)?report.static_analysis_runs:[];
+  if(!runs.length){section.append(node("p","hint","No local static-analysis run has been saved for this case."));parent.append(section);return;}
+  runs.forEach((run,index)=>{
+    const result=run.result||{};const heading=index===0?"Latest run":`Earlier run ${runs.length-index}`;
+    section.append(node("h4","",`${heading} · ${run.language||result.language||"unknown"} · ${formatDate(run.created_at)}`));
+    section.append(node("p","hint",`Run by ${run.actor||"unknown"} · Source SHA-256 ${run.source_sha256||"unavailable"} · ${result.finding_count||0} heuristic finding(s)`));
+    if(!Array.isArray(result.findings)||!result.findings.length){section.append(node("p","hint","No configured pattern matched. This is not evidence that the source is free of vulnerabilities."));return;}
+    result.findings.forEach(finding=>{
+      const card=node("article","evidence-item");const head=node("div","evidence-head");
+      head.append(node("span","evidence-pill",finding.rule_id||"local-rule"),node("span","evidence-pill",`${finding.severity||"unknown"} · ${finding.confidence||"heuristic"}`),node("span","evidence-pill",`Line ${finding.line||"?"}`));
+      card.append(head,node("strong","",finding.title||"Potential issue"));
+      if(finding.cwe)card.append(node("span","evidence-pill",finding.cwe));
+      if(finding.source_snippet)card.append(node("pre","evidence-quote",finding.source_snippet));
+      if(finding.description)card.append(node("p","evidence-explanation",finding.description));
+      card.append(node("p","hint","Heuristic match only · not independently verified."));section.append(card);
+    });
+  });
+  parent.append(section);
+}
 function renderHistory(parent, events){
   const section = node("section", "section"); section.append(node("h3", "", "Audit history"));
   if(!events || !events.length){ section.append(node("p", "hint", "No events recorded.")); parent.append(section); return; }
@@ -428,6 +450,14 @@ function renderDetail(report, events){
   const status = node("span", "status " + report.status, report.status.replace("-", " ")); header.append(heading, status); root.append(header);
   const details = node("p", "hint", `Received ${formatDate(report.created_at)} · Language: ${report.language === "ar" ? "Arabic" : "English"}`); root.append(details);
   const topActions = node("div", "actions");
+  const languageSelect=node("select","small");
+  [["auto","Auto-detect"],["python","Python"],["javascript","JavaScript"],["typescript","TypeScript"],["java","Java"],["go","Go"],["php","PHP"],["ruby","Ruby"],["csharp","C#"],["generic","Generic"]].forEach(([value,label])=>{const option=node("option","",label);option.value=value;languageSelect.append(option);});
+  languageSelect.setAttribute("aria-label","Source language for local static checks");
+  const staticButton=node("button","btn ghost","Run local static checks");staticButton.type="button";
+  staticButton.disabled=!report.code||report.status==="reviewed"||!["admin","analyst"].includes(state.principal?.role);
+  staticButton.title=report.status==="reviewed"?"Reviewed cases are immutable; create a new case to add analysis.":report.code?"Run bounded local text-pattern checks; no code execution or network access.":"This case has no supplied source code.";
+  staticButton.addEventListener("click",()=>runStaticAnalysis(report.id,languageSelect.value,staticButton));
+  topActions.append(languageSelect,staticButton);
   const analyzing = state.analysisPending === report.id;
   const anotherAnalysis = Boolean(state.analysisPending) && !analyzing;
   const analyze = node("button", "btn primary", analyzing ? "Analysis in progress…" : anotherAnalysis ? "Wait for current analysis…" : report.analysis ? "Run analysis again" : "Analyze with Meta"); analyze.type = "button"; analyze.id = "analyzeButton";
@@ -443,9 +473,19 @@ function renderDetail(report, events){
   if(!state.hasKey){ root.append(node("p", "hint", "Add your personal Meta API key in the account panel to enable live analysis. Built-in examples remain local.")); }
   appendTextSection(root, "Original report · untrusted text", report.report, false, "source-report");
   if(report.code) appendTextSection(root, "Supplied source · read-only context", report.code, true, "source-code");
+  renderStaticAnalysis(root,report);
   renderAnalysis(root, report);
   if(report.analysis){ renderReview(root, report); }
   renderHistory(root, events);
+}
+async function runStaticAnalysis(id,language,button){
+  button.disabled=true;
+  try{
+    await api(`/api/reports/${encodeURIComponent(id)}/static-analysis`,{method:"POST",body:JSON.stringify({language})});
+    flash("Local heuristic checks completed and saved with this case. Review each signal; it is not a confirmed vulnerability.");
+    await refreshAll(id);
+  }catch(error){flash(error.message||"Local static analysis failed.","error");}
+  finally{button.disabled=false;}
 }
 function renderReview(parent, report){
   const section = node("section", "section"); section.append(node("h3", "", "Human disposition"));
