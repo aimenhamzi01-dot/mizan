@@ -81,6 +81,8 @@ curl "${AUTH[@]}" http://127.0.0.1:8000/api/metrics
 
 `GET /healthz` is unauthenticated for container health checks and returns only `{"ok":true}`. `/api/health` returns `ok`, boolean `has_key`, and storage type. It never returns credentials. List responses are bounded summaries; metrics contain workspace-scoped counts only.
 
+Assessment target scopes require an absolute, timezone-aware `expires_at` timestamp in ISO-8601 format. Missing, malformed, naive, or expired authorization timestamps fail closed and prevent reconnaissance or scanning. Example target payloads should include a value such as `"expires_at":"2099-01-01T00:00:00Z"`.
+
 ## Save a case locally
 
 An analyst submits a case to their own workspace; it is stored as text and no model call is made:

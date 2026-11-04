@@ -8,19 +8,46 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import ipaddress
 import socket
 import ssl
 from typing import Any
 from urllib.parse import urlsplit
 
-from security_scope import ScopeError, TargetScope, resolve_and_validate_host
+from security_scope import ScopeError, TargetScope, is_ip_blocked, resolve_and_validate_host
 
 
-def get_tls_certificate_info(hostname: str, port: int = 443, timeout: float = 5.0) -> dict[str, Any]:
+def _validate_resolved_ips(candidates: list[str]) -> list[str]:
+    """Validate an already-resolved address list without doing another DNS lookup."""
+    if not candidates:
+        raise ScopeError("No validated address is available for network inspection.")
+    validated: list[str] = []
+    for candidate in candidates:
+        try:
+            ip_obj = ipaddress.ip_address(candidate)
+        except ValueError as exc:
+            raise ScopeError(f"Invalid resolved IP address: {candidate}") from exc
+        if is_ip_blocked(ip_obj):
+            raise ScopeError(f"Resolved IP {candidate} is in a restricted or private range.")
+        normalized = str(ip_obj)
+        if normalized not in validated:
+            validated.append(normalized)
+    return validated
+
+
+def get_tls_certificate_info(
+    hostname: str,
+    port: int = 443,
+    timeout: float = 5.0,
+    resolved_ips: list[str] | None = None,
+) -> dict[str, Any]:
     """Retrieve and inspect TLS certificate details safely."""
     context = ssl.create_default_context()
-    # Ensure SSRF protection
-    resolve_and_validate_host(hostname)
+    # Resolve once and connect to one of the exact validated addresses. Never
+    # resolve the hostname again between SSRF validation and the connection.
+    safe_ips = _validate_resolved_ips(
+        resolved_ips if resolved_ips is not None else resolve_and_validate_host(hostname)
+    )
 
     cert_info: dict[str, Any] = {
         "status": "unknown",
@@ -37,7 +64,7 @@ def get_tls_certificate_info(hostname: str, port: int = 443, timeout: float = 5.
     }
 
     try:
-        with socket.create_connection((hostname, port), timeout=timeout) as sock:
+        with socket.create_connection((safe_ips[0], port), timeout=timeout) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as ssock:
                 cert = ssock.getpeercert()
                 cipher = ssock.cipher()
@@ -89,34 +116,24 @@ def get_tls_certificate_info(hostname: str, port: int = 443, timeout: float = 5.
     return cert_info
 
 
-def inspect_dns(hostname: str) -> dict[str, Any]:
+def inspect_dns(hostname: str, resolved_ips: list[str] | None = None) -> dict[str, Any]:
     """Inspect DNS address records with SSRF validation."""
-    resolve_and_validate_host(hostname)
+    # `resolve_and_validate_host` performs one complete resolution and checks
+    # every result. Reuse that result instead of doing a second DNS lookup.
+    safe_ips = _validate_resolved_ips(
+        resolved_ips if resolved_ips is not None else resolve_and_validate_host(hostname)
+    )
     dns_records: dict[str, Any] = {
         "hostname": hostname,
         "a_records": [],
         "aaaa_records": [],
     }
 
-    try:
-        # IPv4
-        v4_res = socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_STREAM)
-        for r in v4_res:
-            ip = r[4][0]
-            if ip not in dns_records["a_records"]:
-                dns_records["a_records"].append(ip)
-    except Exception:
-        pass
-
-    try:
-        # IPv6
-        v6_res = socket.getaddrinfo(hostname, None, socket.AF_INET6, socket.SOCK_STREAM)
-        for r in v6_res:
-            ip = r[4][0]
-            if ip not in dns_records["aaaa_records"]:
-                dns_records["aaaa_records"].append(ip)
-    except Exception:
-        pass
+    for ip in safe_ips:
+        parsed = ipaddress.ip_address(ip)
+        key = "a_records" if parsed.version == 4 else "aaaa_records"
+        if ip not in dns_records[key]:
+            dns_records[key].append(ip)
 
     return dns_records
 
@@ -149,8 +166,10 @@ def run_reconnaissance(scope: TargetScope, target_input: str) -> dict[str, Any]:
         },
     }
 
-    # 1. DNS Recon
-    dns_data = inspect_dns(host)
+    # 1. DNS Recon. The same validated addresses are passed to all network
+    # operations in this run, eliminating a validation/connection DNS window.
+    safe_ips = resolve_and_validate_host(host)
+    dns_data = inspect_dns(host, resolved_ips=safe_ips)
     result["dns"] = dns_data
     for ip in dns_data.get("a_records", []):
         result["assets_discovered"].append({
@@ -169,7 +188,7 @@ def run_reconnaissance(scope: TargetScope, target_input: str) -> dict[str, Any]:
 
     # 2. TLS Recon (if port 443 or https)
     if scheme == "https" or port in (443, 8443):
-        tls_data = get_tls_certificate_info(host, port)
+        tls_data = get_tls_certificate_info(host, port, resolved_ips=safe_ips)
         result["tls"] = tls_data
         for san in tls_data.get("sans", []):
             if san.startswith("DNS:"):

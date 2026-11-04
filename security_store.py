@@ -147,6 +147,8 @@ def create_target(
     actor_user_id: str | None = None,
 ) -> dict[str, Any]:
     # Validate scope creation parameters
+    if not isinstance(expires_at, str) or not expires_at.strip():
+        raise ScopeError("Target scope expiration is required.")
     scope = TargetScope(
         name=name,
         authorized_domains=authorized_domains,
@@ -158,6 +160,8 @@ def create_target(
         authorization_notes=authorization_notes,
         workspace_id=workspace_id,
     )
+    if scope.is_expired():
+        raise ScopeError("Target scope expiration must be a valid future timezone-aware timestamp.")
     init_security_db()
     target_id = f"tgt-{uuid.uuid4().hex[:12]}"
     now = _now()

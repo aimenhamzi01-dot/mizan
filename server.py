@@ -768,8 +768,8 @@ class Handler(BaseHTTPRequestHandler):
                                 original_source=target_url,
                                 collection_method="automated_safe_scanner",
                                 raw_content=f["evidence"],
-                                verification_status="verified",
-                                confidence_score=0.9,
+                                verification_status="unverified",
+                                confidence_score=0.5,
                             )
                             security_store.save_evidence_item(
                                 assessment_id=asm_id,
@@ -811,6 +811,13 @@ class Handler(BaseHTTPRequestHandler):
                 notes = payload.get("notes", "")
                 override_sev = payload.get("override_severity")
                 override_conf = payload.get("override_confidence")
+                valid_decisions = {"approve", "reject", "confirm", "request_more_evidence"}
+                if not isinstance(decision, str) or decision not in valid_decisions:
+                    raise RequestError(400, "Decision must be one of: approve, reject, confirm, request_more_evidence.")
+                if not isinstance(notes, str):
+                    raise RequestError(400, "Review notes must be text.")
+                if (override_sev is not None or override_conf is not None) and len(notes.strip()) < 10:
+                    raise RequestError(400, "A substantive note is required when overriding severity or confidence.")
 
                 fnd = security_store.get_finding(f_id, workspace_id=scope)
                 current_sev = override_sev if override_sev else fnd["severity"]
@@ -822,7 +829,7 @@ class Handler(BaseHTTPRequestHandler):
                     "confirm": "confirmed",
                     "request_more_evidence": "needs_more_evidence",
                 }
-                new_status = status_map.get(decision, "pending_human_review")
+                new_status = status_map[decision]
 
                 rscore = risk_engine.calculate_risk(current_sev, current_conf)
                 if override_sev or override_conf:
@@ -830,7 +837,7 @@ class Handler(BaseHTTPRequestHandler):
                         current_risk=rscore,
                         new_severity=current_sev,
                         new_confidence=current_conf,
-                        reason=notes or "Analyst risk calibration",
+                        reason=notes,
                         analyst_username=username,
                     )
 

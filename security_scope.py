@@ -174,13 +174,16 @@ class TargetScope:
                 raise ScopeError(f"Invalid authorized IP address/CIDR: {ip}")
 
     def is_expired(self) -> bool:
-        if not self.expires_at:
-            return False
+        # Authorization without a usable expiry is never considered active.
+        if not isinstance(self.expires_at, str) or not self.expires_at.strip():
+            return True
         try:
             exp = datetime.fromisoformat(self.expires_at.replace("Z", "+00:00"))
+            if exp.tzinfo is None:
+                return True
             return datetime.now(timezone.utc) > exp
-        except ValueError:
-            return False
+        except (AttributeError, TypeError, ValueError):
+            return True
 
     def validate_destination(self, url_or_host: str, allow_resolved_ips: bool = True) -> tuple[str, str, int, str]:
         """Validate an assessment destination against this authorized scope.

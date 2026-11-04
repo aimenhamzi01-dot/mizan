@@ -53,6 +53,7 @@ class TestSecurityScopeAndSSRF(unittest.TestCase):
             authorized_domains=["example.com", "*.partner.org"],
             permitted_ports=[80, 443],
             excluded_assets=["secret.partner.org"],
+            expires_at="2099-01-01T00:00:00Z",
         )
 
         # Authorized target
@@ -82,6 +83,41 @@ class TestSecurityScopeAndSSRF(unittest.TestCase):
         with patch("security_scope.resolve_and_validate_host", side_effect=security_scope.ScopeError("Blocked IP")):
             with self.assertRaises(security_scope.ScopeError):
                 scope.validate_destination("https://example.com")
+
+    def test_scope_expiration_fails_closed_for_missing_malformed_and_naive_values(self):
+        for expires_at in (None, "not-a-date", "2099-01-01T00:00:00"):
+            scope = security_scope.TargetScope(
+                name="Unverifiable Scope",
+                authorized_domains=["example.com"],
+                expires_at=expires_at,
+            )
+            self.assertTrue(scope.is_expired(), expires_at)
+            with patch("security_scope.resolve_and_validate_host", return_value=["93.184.216.34"]):
+                with self.assertRaises(security_scope.ScopeError):
+                    scope.validate_destination("https://example.com")
+
+    def test_recon_reuses_same_validated_addresses_for_dns_and_tls(self):
+        safe_ips = ["93.184.216.34", "2001:4860:4860::8888"]
+        with patch("recon_engine.resolve_and_validate_host", return_value=safe_ips) as resolve, \
+             patch("recon_engine.socket.create_connection") as connect, \
+             patch("recon_engine.ssl.create_default_context") as context_factory:
+            context = context_factory.return_value
+            socket_obj = connect.return_value.__enter__.return_value
+            tls_socket = context.wrap_socket.return_value.__enter__.return_value
+            tls_socket.getpeercert.return_value = {}
+            tls_socket.cipher.return_value = ("TLS_AES_128_GCM_SHA256", "TLSv1.3", 128)
+            tls_socket.version.return_value = "TLSv1.3"
+            self.assertEqual(recon_engine.inspect_dns("example.com"), {
+                "hostname": "example.com",
+                "a_records": ["93.184.216.34"],
+                "aaaa_records": ["2001:4860:4860::8888"],
+            })
+            recon_engine.get_tls_certificate_info("example.com", resolved_ips=safe_ips)
+            self.assertEqual(resolve.call_count, 1)
+            self.assertEqual(connect.call_args.args[0], ("93.184.216.34", 443))
+            context.wrap_socket.assert_called_once_with(socket_obj, server_hostname="example.com")
+        with self.assertRaises(security_scope.ScopeError):
+            recon_engine.inspect_dns("example.com", resolved_ips=["127.0.0.1"])
 
 
 class TestPromptInjectionDefense(unittest.TestCase):
@@ -122,6 +158,38 @@ class TestPromptInjectionDefense(unittest.TestCase):
         self.assertFalse(prompt_defense.validate_ai_tool_authorization("random_action"))
 
 
+class TestScannerSecurityFixes(unittest.TestCase):
+    def test_pinned_https_uses_ip_for_tcp_and_hostname_for_sni(self):
+        raw_socket = MagicMock()
+        tls_socket = MagicMock()
+        context = MagicMock()
+        context.wrap_socket.return_value = tls_socket
+        with patch("scanner_engine.socket.create_connection", return_value=raw_socket) as connect:
+            conn = scanner_engine._PinnedHTTPSConnection(
+                "example.com", "93.184.216.34", 443, context=context, timeout=3,
+            )
+            conn.connect()
+        connect.assert_called_once_with(("93.184.216.34", 443), 3)
+        context.wrap_socket.assert_called_once_with(raw_socket, server_hostname="example.com")
+        self.assertIs(conn.sock, tls_socket)
+
+    def test_scanner_findings_are_potential_not_confirmed(self):
+        scope = security_scope.TargetScope(
+            name="Scanner Scope",
+            authorized_domains=["example.com"],
+            permitted_ports=[443],
+            expires_at="2099-01-01T00:00:00Z",
+        )
+        client = scanner_engine.SafeHTTPClient()
+        with patch.object(scope, "validate_destination", return_value=("https", "example.com", 443, "/")), \
+             patch.object(client, "request", return_value=(200, {"server": "nginx"}, b"ok")):
+            scanner = scanner_engine.SecurityScanner(scope)
+            scanner.client = client
+            result = scanner.run_scan("https://example.com", check_sensitive_files=False)
+        self.assertTrue(result["findings"])
+        self.assertTrue(all(f["confidence"] == "potential" for f in result["findings"]))
+
+
 class TestEvidenceIntelligenceEngine(unittest.TestCase):
     def test_evidence_integrity(self):
         item = evidence_engine.EvidenceItem(
@@ -153,14 +221,28 @@ class TestEvidenceIntelligenceEngine(unittest.TestCase):
             original_source="https://target.test/login",
             collection_method="scanner",
             raw_content="Missing anti-CSRF token",
-            verification_status="verified",
-            confidence_score=0.85,
+            verification_status="unverified",
+            confidence_score=0.5,
         )
         registry.add_evidence(item)
 
         eval_res = registry.evaluate_finding_support("fnd-10")
-        self.assertEqual(eval_res["support_level"], "confirmed")
-        self.assertEqual(eval_res["recommended_status"], "confirmed")
+        self.assertEqual(eval_res["support_level"], "partial")
+        self.assertEqual(eval_res["recommended_status"], "likely")
+
+        with self.assertRaises(ValueError):
+            evidence_engine.EvidenceItem(
+                evidence_id=None,
+                assessment_id="asm-1",
+                asset_id="asset-1",
+                finding_id="fnd-11",
+                evidence_type="scanner_observation",
+                original_source="https://target.test/login",
+                collection_method="scanner",
+                raw_content="Missing anti-CSRF token",
+                verification_status="verified",
+                confidence_score=0.9,
+            )
 
         # Contradictory evidence
         contra_item = evidence_engine.EvidenceItem(
@@ -251,6 +333,27 @@ class TestReportGenerator(unittest.TestCase):
         self.assertIn("Missing HSTS", html_out)
         self.assertIn("Exposed Config", html_out)
         self.assertIn("abc12345", html_out)
+
+    def test_all_dynamic_report_fields_are_html_escaped(self):
+        report = {
+            "title": "<script>title()</script>",
+            "report_id": "<img src=x onerror=alert(1)>",
+            "generated_at": "<b>now</b>",
+            "executive_summary": {"overall_posture": "<script>posture()</script>"},
+            "scope_and_limitations": {
+                "authorized_domains": ["<img src=x onerror=alert(2)>"] ,
+                "permitted_ports": ["<script>port()</script>"],
+                "scope_notes": "<script>notes()</script>",
+            },
+            "findings": [],
+            "evidence_index": [],
+        }
+        html_out = report_generator.generate_html_report(report)
+        self.assertNotIn("<script>title()</script>", html_out)
+        self.assertNotIn("<img src=x onerror=alert(1)>", html_out)
+        self.assertNotIn("<script>posture()</script>", html_out)
+        self.assertNotIn("<img src=x onerror=alert(2)>", html_out)
+        self.assertIn("&lt;script&gt;title()&lt;/script&gt;", html_out)
 
 
 class TestBenchmarkEngine(unittest.TestCase):

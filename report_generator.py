@@ -17,6 +17,13 @@ import json
 from typing import Any
 
 
+def _escape_html(value: Any, default: str = "") -> str:
+    """Convert arbitrary report data to safely escaped HTML text."""
+    if value is None:
+        value = default
+    return html.escape(str(value), quote=True)
+
+
 def generate_structured_report(
     assessment_data: dict[str, Any],
     target_scope: dict[str, Any],
@@ -96,7 +103,7 @@ def generate_structured_report(
 
 def generate_html_report(report_data: dict[str, Any]) -> str:
     """Generate self-contained, printable HTML report with professional styling."""
-    title = html.escape(report_data.get("title", "Mizan Security Assessment Report"))
+    title = _escape_html(report_data.get("title"), "Mizan Security Assessment Report")
     exec_summary = report_data.get("executive_summary", {})
     scope = report_data.get("scope_and_limitations", {})
     findings = report_data.get("findings", [])
@@ -106,14 +113,14 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
 
     finding_rows = []
     for idx, f in enumerate(findings, start=1):
-        fid = html.escape(f.get("id", f"F-{idx}"))
-        ftitle = html.escape(f.get("title", "Untitled Finding"))
-        fsev = html.escape((f.get("severity") or "none").upper())
-        fconf = html.escape(f.get("confidence", "unverified"))
-        fcwe = html.escape(f.get("cwe", "CWE-0"))
-        fdesc = html.escape(f.get("description", ""))
-        fev = html.escape(str(f.get("evidence", "No evidence attached.")))
-        fstatus = html.escape(f.get("status", "pending"))
+        fid = _escape_html(f.get("id"), f"F-{idx}")
+        ftitle = _escape_html(f.get("title"), "Untitled Finding")
+        fsev = _escape_html((f.get("severity") or "none").upper())
+        fconf = _escape_html(f.get("confidence"), "unverified")
+        fcwe = _escape_html(f.get("cwe"), "CWE-0")
+        fdesc = _escape_html(f.get("description"))
+        fev = _escape_html(f.get("evidence"), "No evidence attached.")
+        fstatus = _escape_html(f.get("status"), "pending")
 
         sev_class = fsev.lower()
         finding_rows.append(f"""
@@ -182,7 +189,7 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
 <div class="container">
   <header>
     <h1>{title}</h1>
-    <div class="meta-sub">Report ID: {report_data.get('report_id')} · Generated: {report_data.get('generated_at')}</div>
+    <div class="meta-sub">Report ID: {_escape_html(report_data.get('report_id'))} · Generated: {_escape_html(report_data.get('generated_at'))}</div>
   </header>
 
   <section>
@@ -205,14 +212,14 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
         <span class="label">High</span>
       </div>
     </div>
-    <p>Overall Security Posture: <strong>{exec_summary.get('overall_posture', 'N/A')}</strong></p>
+    <p>Overall Security Posture: <strong>{_escape_html(exec_summary.get('overall_posture'), 'N/A')}</strong></p>
   </section>
 
   <section>
     <h2>Assessment Scope & Boundaries</h2>
-    <p><strong>Authorized Domains:</strong> {', '.join(scope.get('authorized_domains', []))}</p>
-    <p><strong>Permitted Ports:</strong> {', '.join(str(p) for p in scope.get('permitted_ports', []))}</p>
-    <p><strong>Authorization Notes:</strong> {html.escape(scope.get('scope_notes', 'Standard authorized assessment.'))}</p>
+    <p><strong>Authorized Domains:</strong> {_escape_html(', '.join(str(d) for d in scope.get('authorized_domains', [])))}</p>
+    <p><strong>Permitted Ports:</strong> {_escape_html(', '.join(str(p) for p in scope.get('permitted_ports', [])))}</p>
+    <p><strong>Authorization Notes:</strong> {_escape_html(scope.get('scope_notes'), 'Standard authorized assessment.')}</p>
   </section>
 
   <section>
@@ -227,7 +234,7 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
         <tr><th>Evidence ID</th><th>Finding ID</th><th>Type</th><th>Verification</th><th>SHA-256 Hash</th></tr>
       </thead>
       <tbody>
-        {"".join(f"<tr><td>{html.escape(e.get('evidence_id',''))}</td><td>{html.escape(e.get('finding_id',''))}</td><td>{html.escape(e.get('type',''))}</td><td>{html.escape(e.get('verification_status',''))}</td><td><code>{html.escape(e.get('sha256','')[:24])}...</code></td></tr>" for e in evidence)}
+        {"".join(f"<tr><td>{_escape_html(e.get('evidence_id'))}</td><td>{_escape_html(e.get('finding_id'))}</td><td>{_escape_html(e.get('type'))}</td><td>{_escape_html(e.get('verification_status'))}</td><td><code>{_escape_html(str(e.get('sha256') or '')[:24])}...</code></td></tr>" for e in evidence)}
       </tbody>
     </table>
   </section>

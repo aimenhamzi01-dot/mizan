@@ -55,10 +55,28 @@ class TestUnifiedAPIEndpoints(unittest.TestCase):
 
     def test_end_to_end_assessment_workflow(self):
         # 1. Register target
+        with self.assertRaises(HTTPError) as missing_expiry:
+            self._req("/api/targets", "POST", {
+                "name": "Missing Expiry Target",
+                "authorized_domains": ["api.example.com"],
+                "permitted_ports": [443],
+            })
+        self.assertEqual(missing_expiry.exception.code, 400)
+
+        with self.assertRaises(HTTPError) as malformed_expiry:
+            self._req("/api/targets", "POST", {
+                "name": "Malformed Expiry Target",
+                "authorized_domains": ["api.example.com"],
+                "permitted_ports": [443],
+                "expires_at": "not-a-date",
+            })
+        self.assertEqual(malformed_expiry.exception.code, 400)
+
         status, tgt_res = self._req("/api/targets", "POST", {
             "name": "Integration Test Target",
             "authorized_domains": ["api.example.com"],
             "permitted_ports": [80, 443],
+            "expires_at": "2099-01-01T00:00:00Z",
             "authorization_notes": "Authorized pentest scope",
         })
         self.assertEqual(status, 201)
@@ -107,10 +125,30 @@ class TestUnifiedAPIEndpoints(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(rev_res["finding"]["status"], "confirmed")
 
+        with self.assertRaises(HTTPError) as invalid_review:
+            self._req(f"/api/findings/{finding_id}/review", "POST", {
+                "decision": "auto-confirm-everything",
+                "notes": "malicious client value",
+            })
+        self.assertEqual(invalid_review.exception.code, 400)
+
+        with self.assertRaises(HTTPError) as invalid_override:
+            self._req(f"/api/findings/{finding_id}/review", "POST", {
+                "decision": "confirm",
+                "override_severity": "critical",
+                "notes": "short",
+            })
+        self.assertEqual(invalid_override.exception.code, 400)
+
         # 6. Verify Evidence Registry
         status, evi_res = self._req(f"/api/assessments/{asm_id}/evidence")
         self.assertEqual(status, 200)
         self.assertGreater(len(evi_res["evidence"]), 0)
+        scanner_evidence = [
+            item for item in evi_res["evidence"] if item["evidence_type"] == "scanner_observation"
+        ]
+        self.assertTrue(scanner_evidence)
+        self.assertTrue(all(item["verification_status"] == "unverified" for item in scanner_evidence))
 
         # 7. Audit Trail Verification
         status, audit_res = self._req("/api/audit/verify")

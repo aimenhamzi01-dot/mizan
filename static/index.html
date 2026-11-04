@@ -168,6 +168,7 @@ footer{color:var(--muted);font-size:.76rem;margin-top:22px;text-align:center}cod
       <div class="field"><label for="tgtDomains">Authorized Domains (comma-separated)</label><input id="tgtDomains" type="text" required placeholder="example.com, *.example.com"></div>
       <div class="field"><label for="tgtPorts">Permitted Ports (comma-separated)</label><input id="tgtPorts" type="text" value="80, 443, 8080, 8443"></div>
       <div class="field"><label for="tgtExcluded">Excluded Assets (comma-separated)</label><input id="tgtExcluded" type="text" placeholder="internal.example.com, payment.example.com"></div>
+      <div class="field"><label for="tgtExpires">Authorization Expires</label><input id="tgtExpires" type="datetime-local" required><small>Required. Operations fail closed after this UTC authorization deadline.</small></div>
       <div class="field"><label for="tgtNotes">Authorization Notes</label><textarea id="tgtNotes" placeholder="Written authorization reference, RoE, and contact info"></textarea></div>
       <button class="btn primary" type="submit">Register Authorized Target</button>
     </form>
@@ -768,9 +769,14 @@ $("newTargetForm").addEventListener("submit", async e=>{
   const domains = $("tgtDomains").value.split(",").map(x=>x.trim()).filter(Boolean);
   const ports = $("tgtPorts").value.split(",").map(x=>parseInt(x.trim())).filter(x=>!isNaN(x));
   const excluded = $("tgtExcluded").value.split(",").map(x=>x.trim()).filter(Boolean);
+  const expiresInput = $("tgtExpires").value;
   const notes = $("tgtNotes").value.trim();
+  if(!expiresInput){ flash("An authorization expiration is required.", "error"); return; }
+  const expiresDate = new Date(expiresInput);
+  if(Number.isNaN(expiresDate.getTime())){ flash("The authorization expiration is invalid.", "error"); return; }
+  const expiresAt = expiresDate.toISOString();
   try{
-    await api("/api/targets", {method:"POST", body:JSON.stringify({name, authorized_domains:domains, permitted_ports:ports, excluded_assets:excluded, authorization_notes:notes})});
+    await api("/api/targets", {method:"POST", body:JSON.stringify({name, authorized_domains:domains, permitted_ports:ports, excluded_assets:excluded, expires_at:expiresAt, authorization_notes:notes})});
     $("newTargetForm").reset(); flash("Authorized target registered with strict SSRF scope.");
     await loadTargets();
   }catch(err){ flash(err.message, "error"); }

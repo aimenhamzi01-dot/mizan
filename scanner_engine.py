@@ -10,8 +10,10 @@ Never executes destructive tests, exploits, or automatic shell commands.
 from __future__ import annotations
 
 import datetime
+import errno
 import hashlib
 import http.client
+import socket
 import ssl
 import time
 from typing import Any, Callable
@@ -73,6 +75,27 @@ class ScanCancelledException(Exception):
     """Raised when a scan is cancelled by user request."""
 
 
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS connection pinned to a validated IP while retaining hostname SNI."""
+
+    def __init__(self, host: str, connect_ip: str, port: int, **kwargs):
+        super().__init__(host, port=port, **kwargs)
+        self._connect_ip = connect_ip
+
+    def connect(self) -> None:
+        # Avoid a second hostname resolution. self.host is retained for SNI
+        # and certificate verification, while TCP connects to the validated IP.
+        self.sock = socket.create_connection((self._connect_ip, self.port), self.timeout)
+        try:
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError as exc:
+            if exc.errno != errno.ENOPROTOOPT:
+                raise
+        if self._tunnel_host:
+            self._tunnel()
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+
+
 class SafeHTTPClient:
     """SSRF-guarded HTTP client that validates resolved IP on every connection."""
 
@@ -99,14 +122,14 @@ class SafeHTTPClient:
         if headers:
             req_headers.update(headers)
 
-        # Anti-DNS Rebinding: connect directly to the verified safe IP while preserving Host header and SNI
+        # Anti-DNS Rebinding: connect to the verified IP while preserving the
+        # original hostname for HTTP Host, TLS SNI, and certificate validation.
         connect_ip = safe_ips[0]
         if scheme == "https":
             context = ssl.create_default_context()
-            # Pass server_hostname=host so TLS SNI and cert check validate against the domain name
-            conn = http.client.HTTPSConnection(connect_ip, port, context=context, timeout=self.timeout)
-            # Override connection host attribute for proper SNI / certificate validation
-            conn._server_hostname = host
+            conn = _PinnedHTTPSConnection(
+                host, connect_ip, port, context=context, timeout=self.timeout,
+            )
         else:
             conn = http.client.HTTPConnection(connect_ip, port, timeout=self.timeout)
 
@@ -169,7 +192,7 @@ class SecurityScanner:
                         "title": hinfo["title"],
                         "category": "security_headers",
                         "severity": hinfo["severity"],
-                        "confidence": "confirmed",
+                        "confidence": "potential",
                         "cwe": hinfo["cwe"],
                         "description": hinfo["description"],
                         "evidence": f"Header '{hname}' was absent from HTTP {status} response headers.",
@@ -186,7 +209,7 @@ class SecurityScanner:
                     "title": "Server Information Disclosure",
                     "category": "information_disclosure",
                     "severity": "low",
-                    "confidence": "confirmed",
+                    "confidence": "potential",
                     "cwe": "CWE-200",
                     "description": f"The HTTP response leaks server software/technology versions: {tech_str}",
                     "evidence": tech_str,
@@ -212,7 +235,7 @@ class SecurityScanner:
                         "title": f"Insecure Cookie Flags: Missing {', '.join(missing_flags)}",
                         "category": "cookie_security",
                         "severity": "medium" if "HttpOnly" in missing_flags else "low",
-                        "confidence": "confirmed",
+                        "confidence": "potential",
                         "cwe": "CWE-614",
                         "description": f"Cookie sent without recommended security flags ({', '.join(missing_flags)}).",
                         "evidence": f"Set-Cookie: {set_cookie[:200]}",
@@ -260,7 +283,7 @@ class SecurityScanner:
                                 "title": ptitle,
                                 "category": "exposed_files",
                                 "severity": psev,
-                                "confidence": "confirmed" if psev in ("critical", "high") else "potential",
+                                "confidence": "potential",
                                 "cwe": "CWE-552",
                                 "description": pdesc,
                                 "evidence": f"Path '{probe_path}' returned HTTP 200 (length: {len(pbody)} bytes). Snippet: {pbody[:100].decode('utf-8', errors='replace')}",

@@ -78,6 +78,8 @@ class EvidenceItem:
 
         if verification_status not in VERIFICATION_STATUSES:
             raise ValueError(f"Invalid verification status: {verification_status}")
+        if evidence_type == "scanner_observation" and verification_status == "verified":
+            raise ValueError("Scanner observations require independent verification before evidence can be verified.")
         self.verification_status = verification_status
 
         self.confidence_score = max(0.0, min(1.0, float(confidence_score)))
