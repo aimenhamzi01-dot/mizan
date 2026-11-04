@@ -18,6 +18,31 @@ A self-hosted workbench that helps security researchers review vulnerability rep
 
 </div>
 
+> **The one-line pitch:** Mizan is an evidence-led security triage workbench that uses Meta's Muse Spark to accelerate review without letting an AI model—or a scanner—make the final security decision.
+
+### Why this belongs in the hackathon
+
+Mizan turns a real practitioner problem into a working product: separating useful vulnerability evidence from noisy, incomplete, or adversarial submissions. It fits **Build for Your World** because it is built from firsthand security-review work, and it **Pushes the Frontier** by treating model output as a reviewable claim with provenance rather than as an answer to trust.
+
+**Judge-ready highlights:**
+
+- **Visible model value:** Muse Spark produces a structured triage assessment, identifies prompt-injection attempts, and proposes what a reviewer should inspect next.
+- **A concrete safety contribution:** Mizan independently checks quoted report/code excerpts, labels their source and occurrence count, and fails closed to `need-info` when evidence is incomplete or unverifiable.
+- **Human accountability by design:** the model recommendation and the authenticated reviewer's disposition are separate records; no model output closes a case or triggers an external action.
+- **A complete product loop:** local case intake, Meta analysis with explicit consent, evidence inspection, optional challenge pass, audit trail, and a subordinate Phantom handoff all work in one self-hosted workbench.
+
+```text
+Untrusted report + supplied code
+              ↓
+       Mizan + Muse Spark
+              ↓
+ Evidence matching + missing-context checks
+              ↓
+     Human reviewer decision
+              ↓
+      Auditable disposition
+```
+
 ## The problem Mizan takes on
 
 Security teams spend time sorting actionable vulnerability reports from scanner output, incomplete claims, and AI-generated noise. Reports can also contain prompt-injection text aimed at manipulating an AI reviewer. Mizan gives researchers a structured place to assess those reports while keeping the model advisory and the final disposition explicitly human-owned.
@@ -44,6 +69,16 @@ You can explore the workbench without a Meta API key or a model call:
 
 Live Muse Spark analysis is optional. It requires a researcher's own Meta API key and an explicit confirmation before case content is sent to the configured endpoint.
 
+### Suggested 3-minute demo flow
+
+1. **0:00–0:25 — The problem:** open the synthetic IDOR evidence trail and show the noisy report, quoted code, and the prompt-injection text that must not control the reviewer.
+2. **0:25–1:20 — Meta reasoning:** run the case through Muse Spark with explicit egress consent. Show the structured claim, severity suggestion, injection warning, and source-labelled excerpts.
+3. **1:20–2:05 — The trust boundary:** show Mizan's literal quote matching, occurrence counts, missing-context flags, and the fail-closed `need-info` outcome. Emphasize that a text match does not prove exploitability.
+4. **2:05–2:35 — Human control:** change or confirm the proposed disposition and show the authenticated audit event. The model recommends; the human decides.
+5. **2:35–3:00 — Product scope:** briefly show the signed Mizan-to-Phantom handoff and the final import preview, then return to Mizan as the single decision plane.
+
+The built-in demo is intentionally synthetic and local-first, so judges can reproduce the core workflow without a provider key. Live Meta analysis is an optional second pass, not a prerequisite for evaluating the safety model.
+
 ## What makes Mizan different
 
 - **Evidence that can be checked.** The model returns report or code excerpts with source labels. Mizan checks each quote against the stated input and calculates its location and occurrence count so a reviewer can return to the original text. Any incomplete response schema or unverified quote is downgraded to `need-info` for human review.
@@ -60,6 +95,10 @@ Mizan uses Meta Model API Chat Completions with Muse Spark's native strict JSON 
 The default model order is `muse-spark-1.3`, `muse-spark-1.2`, then `muse-spark-1.1`. An opted-in challenge uses a configured Muse Spark version different from the resolved primary model when one is available; by default it tries 1.2 then 1.1. The challenge is still advisory and is **not independent verification**. Both calls require explicit egress consent, and the additional call can incur provider usage and charges.
 
 Structured generation constrains the response shape, not its truth. The server independently checks the literal presence and source attribution of each quote and applies fail-closed rules; any incomplete schema or unverifiable quote downgrades the suggestion to `need-info`. A text match does not prove that a quote is relevant, complete, true, reachable, or sufficient to establish exploitability. Mizan records the resolved model, reasoning effort, requested output format, prompt/schema fingerprint, elapsed time, and token usage when supplied by the API.
+
+### What Mizan deliberately does not claim
+
+Mizan is not an autonomous vulnerability validator, an exploit generator, or a replacement for a security reviewer. It does not claim that a citation match proves exploitability, that a model-generated severity is ground truth, or that Phantom's `verified` field is independent confirmation. Those limits are part of the product: they make the system's uncertainty visible and keep the decision accountable.
 
 ## Run Mizan locally
 
