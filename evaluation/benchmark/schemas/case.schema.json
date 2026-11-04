@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MizanBenchmarkCase",
+  "type": "object",
+  "required": [
+    "case_id",
+    "category",
+    "title",
+    "report",
+    "evidence",
+    "expected_outcome",
+    "expected_risk",
+    "attack_indicators",
+    "ground_truth",
+    "evaluation_notes"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "pattern": "^MIZAN-[0-9]{3}$"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "valid_finding",
+        "false_positive",
+        "unsupported_evidence",
+        "prompt_injection",
+        "ambiguous_incomplete",
+        "contradictory_evidence",
+        "mixed_quality"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 5
+    },
+    "report": {
+      "type": "string",
+      "minLength": 10
+    },
+    "code": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "quote", "relation"],
+        "properties": {
+          "source": { "type": "string", "enum": ["report", "code"] },
+          "quote": { "type": "string" },
+          "relation": { "type": "string", "enum": ["supports", "contradicts", "context-needed"] },
+          "state": { "type": "string", "enum": ["OBSERVED", "REPRODUCIBLE", "VALIDATED", "HUMAN_CONFIRMED"] }
+        }
+      }
+    },
+    "expected_outcome": {
+      "type": "string",
+      "enum": ["accepted", "rejected", "need-info", "duplicate"]
+    },
+    "expected_risk": {
+      "type": "string",
+      "enum": ["none", "low", "medium", "high", "critical"]
+    },
+    "attack_indicators": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "ground_truth": {
+      "type": "object",
+      "required": [
+        "is_valid",
+        "evidence_supported",
+        "contains_prompt_injection"
+      ],
+      "properties": {
+        "is_valid": { "type": "boolean" },
+        "evidence_supported": { "type": "boolean" },
+        "contains_prompt_injection": { "type": "boolean" },
+        "evidence_state": {
+          "type": "string",
+          "enum": ["OBSERVED", "REPRODUCIBLE", "VALIDATED", "HUMAN_CONFIRMED", "UNSUPPORTED"]
+        }
+      }
+    },
+    "evaluation_notes": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

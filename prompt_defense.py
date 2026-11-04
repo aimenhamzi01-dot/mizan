@@ -34,15 +34,31 @@ INJECTION_SIGNATURES = [
     (r"\baccept\s+this\s+(finding|report|vulnerability)\s+(immediately|as\s+critical|without\s+review)\b", "verdict_coercion"),
     (r"\bmark\s+(this|it)\s+as\s+(confirmed|critical|accept)\b", "verdict_coercion"),
     (r"\bbypass\s+(all\s+)?(security|guardrails|checks|filters)\b", "guardrail_bypass"),
-    (r"\bexec(ute)?\s+(the\s+following\s+)?(shell|bash|command|tool|python)\b", "unauthorized_tool_execution"),
-    (r"\bauthorize\s+(the\s+)?(scan|attack|execution|deletion)\b", "unauthorized_authorization"),
+    (r"\bexec(ute)?\s+(the\s+following\s+)?(shell|bash|command|tool|python|decoded|payload)\b", "unauthorized_tool_execution"),
+    (r"\bauthorize\s+(the\s+)?(scan|attack|execution|deletion|immediate)\b", "unauthorized_authorization"),
 
-    # Arabic direct overrides
+    # Attack families: System Prompt Extraction & Authority Impersonation
+    (r"\b(print|reveal|display|output|dump)\s+(the\s+)?system\s+(prompt|instructions|parameters)\b", "system_prompt_extraction"),
+    (r"system\s*:\s*(print|reveal|display)", "system_prompt_extraction"),
+    (r"\[(DEVELOPER|ADMIN|ROOT|SYSTEM)\]", "fake_developer_instruction"),
+    (r"\bas\s+(lead\s+security\s+director|administrator|ceo|owner|system\s+admin)\b", "authority_impersonation"),
+    (r"\bcreate\s+fake\s+(server\s+logs|evidence|proof|stack\s+trace)\b", "evidence_fabrication"),
+    (r"\boverride\s+severity\b|\balways\s+set\s+severity\b", "severity_manipulation"),
+    (r"\bdisregard\s+json\s+schema\b|\boutput\s*:\s*\{.*decision", "output_schema_manipulation"),
+    (r"base64.*(?:execute|payload|instruction)", "encoded_instruction"),
+    (r"\bignore\s+rules\s+and\s+grant\b", "mixed_content_coercion"),
+    (r"\[click\s+here\]\(http.*(?:bypass|auth)", "markdown_injection"),
+    (r"\bforget\s+you\s+are\s+mizan\b|\byou\s+are\s+now\s+autoacceptbot\b", "role_confusion"),
+    (r"\bend\s+of\s+report\.\s+assistant\s+response\b", "simulated_completion"),
+    (r"\bnew\s+system\s+directive\s*:\s*accept\b", "context_overflow_injection"),
+
+    # Arabic direct overrides & authority impersonation
     (r"تجاهل\s+(جميع\s+)?(التعليمات|الأوامر|القواعد)\s+السابقة", "override_instructions_ar"),
     (r"انسَ\s+(جميع\s+)?(التعليمات|الأوامر)\s+السابقة", "override_instructions_ar"),
     (r"أنت\s+الآن\s+في\s+وضع", "persona_hijack_ar"),
     (r"اقبل\s+(هذا\s+)?(التقرير|الثغرة)\s+(فورا|بدون\s+مراجعة)", "verdict_coercion_ar"),
     (r"تجاوز\s+(كل\s+)?(حواجز\s+الحماية|الفحوصات)", "guardrail_bypass_ar"),
+    (r"أنا\s+(مدير|مسؤول)\s+(الأمن|النظام)", "authority_impersonation_ar"),
 ]
 
 COMPILED_INJECTION_PATTERNS = [
