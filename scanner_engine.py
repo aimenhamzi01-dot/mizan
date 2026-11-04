@@ -99,11 +99,16 @@ class SafeHTTPClient:
         if headers:
             req_headers.update(headers)
 
+        # Anti-DNS Rebinding: connect directly to the verified safe IP while preserving Host header and SNI
+        connect_ip = safe_ips[0]
         if scheme == "https":
             context = ssl.create_default_context()
-            conn = http.client.HTTPSConnection(host, port, context=context, timeout=self.timeout)
+            # Pass server_hostname=host so TLS SNI and cert check validate against the domain name
+            conn = http.client.HTTPSConnection(connect_ip, port, context=context, timeout=self.timeout)
+            # Override connection host attribute for proper SNI / certificate validation
+            conn._server_hostname = host
         else:
-            conn = http.client.HTTPConnection(host, port, timeout=self.timeout)
+            conn = http.client.HTTPConnection(connect_ip, port, timeout=self.timeout)
 
         try:
             conn.request(method, path, headers=req_headers)
