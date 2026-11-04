@@ -157,7 +157,7 @@ python3 server.py
 - Workspace isolation and server-side role enforcement.
 - AES-GCM encryption for researcher-supplied Meta API keys.
 - Local deterministic static-analysis hints that never execute submitted code.
-- Optional editable import of a completed Phantom `ScanResult` as an unverified draft.
+- Optional [Phantom](https://github.com/aimenhamzi01-dot/phantom) handoff: import a completed `ScanResult` as an editable, unverified draft.
 - Docker deployment, health checks, CI, and a lightweight standard-library server.
 
 ## Validation
@@ -181,7 +181,7 @@ The test suite covers triage, evidence integrity, prompt-injection boundaries, a
 | [API reference](docs/API.md) | HTTP endpoints and payloads |
 | [Operations guide](docs/OPERATIONS.md) | Deployment and maintenance |
 | [Security and responsible use](SECURITY.md) | Security model and responsible-use guidance |
-| [Phantom integration](docs/PHANTOM_INTEGRATION.md) | Optional scanner handoff |
+| [Phantom integration](docs/PHANTOM_INTEGRATION.md) · [Phantom repository](https://github.com/aimenhamzi01-dot/phantom) | Optional scanner handoff |
 | [Contributing](CONTRIBUTING.md) | Development workflow |
 
 ## License
