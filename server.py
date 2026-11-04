@@ -32,6 +32,16 @@ import triage  # noqa: E402
 import phantom_import  # noqa: E402
 import phantom_task  # noqa: E402
 import static_analysis  # noqa: E402
+import security_store  # noqa: E402
+import security_scope  # noqa: E402
+import recon_engine  # noqa: E402
+import scanner_engine  # noqa: E402
+import prompt_defense  # noqa: E402
+import evidence_engine  # noqa: E402
+import risk_engine  # noqa: E402
+import review_workflow  # noqa: E402
+import benchmark_engine  # noqa: E402
+import report_generator  # noqa: E402
 from demo_data import DEMOS, SAMPLE_INPUT  # noqa: E402
 
 MAX_BODY = 2 * 1024 * 1024
@@ -244,7 +254,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(409, {"error": str(exc)})
         elif isinstance(exc, auth_store.WorkspaceNotFound):
             self._send(404, {"error": "Workspace not found."})
-        elif isinstance(exc, (ValueError, auth_store.AuthStoreError, secret_store.SecretStoreError)):
+        elif isinstance(exc, (ValueError, auth_store.AuthStoreError, secret_store.SecretStoreError, security_scope.ScopeError)):
             self._send(400, {"error": str(exc)})
         elif isinstance(exc, meta_client.MetaAPIError):
             # Upstream 401/403 must not be confused with this user's Mizan token.
@@ -325,6 +335,100 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     self._send(404, {"error": "Not found."})
                 return
+
+            # --- Target & Scope Endpoints ---
+            if path == "/api/targets":
+                self._send(200, {"targets": security_store.list_targets(workspace_id=scope)})
+                return
+            if path.startswith("/api/targets/"):
+                target_id = path[len("/api/targets/"):].strip("/")
+                self._send(200, {"target": security_store.get_target(target_id, workspace_id=scope)})
+                return
+
+            # --- Assessments Endpoints ---
+            if path == "/api/assessments":
+                self._send(200, {"assessments": security_store.list_assessments(workspace_id=scope)})
+                return
+            if path.startswith("/api/assessments/"):
+                subpath = path[len("/api/assessments/"):].strip("/").split("/")
+                asm_id = subpath[0]
+                if len(subpath) == 1:
+                    asm = security_store.get_assessment(asm_id, workspace_id=scope)
+                    self._send(200, {"assessment": asm})
+                    return
+                elif len(subpath) == 2 and subpath[1] == "assets":
+                    assets = security_store.list_discovered_assets(assessment_id=asm_id, workspace_id=scope)
+                    self._send(200, {"assets": assets})
+                    return
+                elif len(subpath) == 2 and subpath[1] == "findings":
+                    findings = security_store.list_findings(assessment_id=asm_id, workspace_id=scope)
+                    self._send(200, {"findings": findings})
+                    return
+                elif len(subpath) == 2 and subpath[1] == "evidence":
+                    evidence = security_store.list_evidence(assessment_id=asm_id, workspace_id=scope)
+                    self._send(200, {"evidence": evidence})
+                    return
+                elif len(subpath) == 2 and subpath[1] == "report":
+                    params = parse_qs(parsed.query, keep_blank_values=True)
+                    fmt = params.get("format", ["json"])[0]
+                    asm = security_store.get_assessment(asm_id, workspace_id=scope)
+                    target = security_store.get_target(asm["target_id"], workspace_id=scope)
+                    findings = security_store.list_findings(assessment_id=asm_id, workspace_id=scope)
+                    evidence = security_store.list_evidence(assessment_id=asm_id, workspace_id=scope)
+                    rep = report_generator.generate_structured_report(
+                        assessment_data=asm,
+                        target_scope=target,
+                        findings=findings,
+                        evidence_items=evidence,
+                    )
+                    if fmt == "html":
+                        html_rep = report_generator.generate_html_report(rep)
+                        self._send(200, html_rep.encode("utf-8"), ctype="text/html; charset=utf-8")
+                    else:
+                        self._send(200, rep)
+                    return
+
+            # --- Assets Endpoint ---
+            if path == "/api/assets":
+                self._send(200, {"assets": security_store.list_discovered_assets(workspace_id=scope)})
+                return
+
+            # --- Findings Endpoints ---
+            if path == "/api/findings":
+                params = parse_qs(parsed.query, keep_blank_values=True)
+                sev = params.get("severity", [""])[0]
+                st = params.get("status", [""])[0]
+                findings = security_store.list_findings(workspace_id=scope, severity=sev, status=st)
+                self._send(200, {"findings": findings})
+                return
+            if path.startswith("/api/findings/"):
+                f_id = path[len("/api/findings/"):].strip("/")
+                fnd = security_store.get_finding(f_id, workspace_id=scope)
+                evi = security_store.list_evidence(finding_id=f_id, workspace_id=scope)
+                self._send(200, {"finding": fnd, "evidence": evi})
+                return
+
+            # --- Evidence Endpoint ---
+            if path == "/api/evidence":
+                self._send(200, {"evidence": security_store.list_evidence(workspace_id=scope)})
+                return
+
+            # --- Audit Trail Endpoints ---
+            if path == "/api/audit":
+                events = security_store.list_audit_events(workspace_id=scope)
+                self._send(200, {"events": events})
+                return
+            if path == "/api/audit/verify":
+                valid, msg = security_store.verify_database_audit_chain()
+                self._send(200, {"valid": valid, "message": msg})
+                return
+
+            # --- Benchmark Endpoints ---
+            if path == "/api/benchmarks":
+                runs = security_store.list_benchmark_runs(workspace_id=scope)
+                self._send(200, {"runs": runs})
+                return
+
             self._send(404, {"error": "Not found."})
         except Exception as exc:
             self._send_api_error(exc, "GET")
@@ -496,6 +600,302 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self._send(200, {"report": updated})
                 return
+
+            # --- Target Creation ---
+            if path == "/api/targets":
+                if not self._require_roles(ANALYZE_ROLES):
+                    return
+                target_ws = self._workspace_for_new_case(payload)
+                name = payload.get("name")
+                domains = payload.get("authorized_domains")
+                if not isinstance(name, str) or not isinstance(domains, list):
+                    raise RequestError(400, "Target name and authorized_domains list are required.")
+                tgt = security_store.create_target(
+                    name=name,
+                    authorized_domains=domains,
+                    authorized_ips=payload.get("authorized_ips"),
+                    permitted_ports=payload.get("permitted_ports"),
+                    permitted_protocols=payload.get("permitted_protocols"),
+                    excluded_assets=payload.get("excluded_assets"),
+                    expires_at=payload.get("expires_at"),
+                    authorization_notes=payload.get("authorization_notes", ""),
+                    workspace_id=target_ws,
+                    created_by=username,
+                    actor_user_id=actor_id,
+                )
+                self._send(201, {"target": tgt})
+                return
+
+            # --- Assessment Creation ---
+            if path == "/api/assessments":
+                if not self._require_roles(ANALYZE_ROLES):
+                    return
+                target_ws = self._workspace_for_new_case(payload)
+                target_id = payload.get("target_id")
+                name = payload.get("name", "")
+                if not isinstance(target_id, str) or not target_id:
+                    raise RequestError(400, "target_id is required.")
+                asm = security_store.create_assessment(
+                    target_id=target_id,
+                    name=name,
+                    workspace_id=target_ws,
+                    created_by=username,
+                    actor_user_id=actor_id,
+                )
+                self._send(201, {"assessment": asm})
+                return
+
+            # --- Assessment Operations (Recon, Scan, Complete) ---
+            if path.startswith("/api/assessments/"):
+                subpath = path[len("/api/assessments/"):].strip("/").split("/")
+                asm_id = subpath[0]
+                action = subpath[1] if len(subpath) > 1 else None
+
+                if action == "recon":
+                    if not self._require_roles(ANALYZE_ROLES):
+                        return
+                    asm = security_store.get_assessment(asm_id, workspace_id=scope)
+                    scope_inst = security_store.get_target_scope_instance(asm["target_id"], workspace_id=scope)
+                    target_url = payload.get("target") or scope_inst.authorized_domains[0]
+
+                    security_store.log_audit_event(
+                        event_type="recon_started",
+                        actor=username,
+                        target_ref=asm_id,
+                        details={"target": target_url},
+                        workspace_id=asm["workspace_id"],
+                        actor_user_id=actor_id,
+                    )
+                    recon_res = recon_engine.run_reconnaissance(scope_inst, target_url)
+
+                    # Save discovered assets
+                    for ast in recon_res.get("assets_discovered", []):
+                        security_store.save_discovered_asset(
+                            assessment_id=asm_id,
+                            asset_type=ast["asset_type"],
+                            identifier=ast["identifier"],
+                            provenance=ast["provenance"],
+                            in_scope=ast["in_scope"],
+                            workspace_id=asm["workspace_id"],
+                        )
+
+                    # Save TLS evidence if present
+                    if recon_res.get("tls", {}).get("has_tls"):
+                        tls_d = recon_res["tls"]
+                        raw_c = json.dumps(tls_d)
+                        evi_item = evidence_engine.EvidenceItem(
+                            evidence_id=None,
+                            assessment_id=asm_id,
+                            asset_id=recon_res["host"],
+                            finding_id="tls-cert",
+                            evidence_type="tls_certificate",
+                            original_source=f"https://{recon_res['host']}:{recon_res['port']}",
+                            collection_method="tls_handshake_inspection",
+                            raw_content=raw_c,
+                            verification_status="verified",
+                            confidence_score=0.95,
+                        )
+                        security_store.save_evidence_item(
+                            assessment_id=asm_id,
+                            finding_id="tls-cert",
+                            evidence_type=evi_item.evidence_type,
+                            original_source=evi_item.original_source,
+                            collection_method=evi_item.collection_method,
+                            raw_content=evi_item.raw_content,
+                            normalized_content=evi_item.normalized_content,
+                            sha256_hash=evi_item.sha256_hash,
+                            verification_status=evi_item.verification_status,
+                            confidence_score=evi_item.confidence_score,
+                            workspace_id=asm["workspace_id"],
+                        )
+
+                    security_store.update_assessment_status(asm_id, "in_progress", summary={"last_action": "reconnaissance"}, workspace_id=scope)
+                    security_store.log_audit_event(
+                        event_type="recon_completed",
+                        actor=username,
+                        target_ref=asm_id,
+                        details={"assets_discovered": len(recon_res.get("assets_discovered", []))},
+                        workspace_id=asm["workspace_id"],
+                        actor_user_id=actor_id,
+                    )
+                    self._send(200, {"recon": recon_res})
+                    return
+
+                elif action == "scan":
+                    if not self._require_roles(ANALYZE_ROLES):
+                        return
+                    asm = security_store.get_assessment(asm_id, workspace_id=scope)
+                    scope_inst = security_store.get_target_scope_instance(asm["target_id"], workspace_id=scope)
+                    target_url = payload.get("target") or scope_inst.authorized_domains[0]
+                    check_files = payload.get("check_sensitive_files", True)
+
+                    security_store.log_audit_event(
+                        event_type="scan_started",
+                        actor=username,
+                        target_ref=asm_id,
+                        details={"target": target_url},
+                        workspace_id=asm["workspace_id"],
+                        actor_user_id=actor_id,
+                    )
+                    scanner = scanner_engine.SecurityScanner(scope_inst)
+                    scan_res = scanner.run_scan(target_url, check_sensitive_files=check_files)
+
+                    # Save findings and attached evidence
+                    for f in scan_res.get("findings", []):
+                        rscore = risk_engine.calculate_risk(f["severity"], f["confidence"])
+                        f_record = security_store.save_finding(
+                            assessment_id=asm_id,
+                            title=f["title"],
+                            category=f["category"],
+                            severity=f["severity"],
+                            confidence=f["confidence"],
+                            description=f["description"],
+                            cwe=f.get("cwe", "CWE-0"),
+                            risk_score=rscore.overall_score,
+                            technical_evidence=f.get("evidence", ""),
+                            status=f.get("status", "pending_human_review"),
+                            workspace_id=asm["workspace_id"],
+                            finding_id=f.get("id"),
+                        )
+                        # Save attached evidence item
+                        if f.get("evidence"):
+                            evi = evidence_engine.EvidenceItem(
+                                evidence_id=None,
+                                assessment_id=asm_id,
+                                asset_id=target_url,
+                                finding_id=f_record["id"],
+                                evidence_type="scanner_observation",
+                                original_source=target_url,
+                                collection_method="automated_safe_scanner",
+                                raw_content=f["evidence"],
+                                verification_status="verified",
+                                confidence_score=0.9,
+                            )
+                            security_store.save_evidence_item(
+                                assessment_id=asm_id,
+                                finding_id=f_record["id"],
+                                evidence_type=evi.evidence_type,
+                                original_source=evi.original_source,
+                                collection_method=evi.collection_method,
+                                raw_content=evi.raw_content,
+                                normalized_content=evi.normalized_content,
+                                sha256_hash=evi.sha256_hash,
+                                verification_status=evi.verification_status,
+                                confidence_score=evi.confidence_score,
+                                workspace_id=asm["workspace_id"],
+                            )
+
+                    security_store.update_assessment_status(
+                        asm_id,
+                        "completed",
+                        summary={"findings_count": scan_res.get("findings_count", 0), "checks": scan_res.get("checks_performed", [])},
+                        workspace_id=scope,
+                    )
+                    security_store.log_audit_event(
+                        event_type="scan_completed",
+                        actor=username,
+                        target_ref=asm_id,
+                        details={"findings_count": scan_res.get("findings_count", 0)},
+                        workspace_id=asm["workspace_id"],
+                        actor_user_id=actor_id,
+                    )
+                    self._send(200, {"scan": scan_res})
+                    return
+
+            # --- Finding Review Adjudication ---
+            if path.startswith("/api/findings/") and path.endswith("/review"):
+                if not self._require_roles(REVIEW_ROLES):
+                    return
+                f_id = path[len("/api/findings/"):-len("/review")].strip("/")
+                decision = payload.get("decision")  # approve, reject, confirm, request_more_evidence
+                notes = payload.get("notes", "")
+                override_sev = payload.get("override_severity")
+                override_conf = payload.get("override_confidence")
+
+                fnd = security_store.get_finding(f_id, workspace_id=scope)
+                current_sev = override_sev if override_sev else fnd["severity"]
+                current_conf = override_conf if override_conf else fnd["confidence"]
+
+                status_map = {
+                    "approve": "approved",
+                    "reject": "rejected",
+                    "confirm": "confirmed",
+                    "request_more_evidence": "needs_more_evidence",
+                }
+                new_status = status_map.get(decision, "pending_human_review")
+
+                rscore = risk_engine.calculate_risk(current_sev, current_conf)
+                if override_sev or override_conf:
+                    rscore = risk_engine.apply_analyst_override(
+                        current_risk=rscore,
+                        new_severity=current_sev,
+                        new_confidence=current_conf,
+                        reason=notes or "Analyst risk calibration",
+                        analyst_username=username,
+                    )
+
+                now_iso = security_store._now()
+                human_review_data = {
+                    "decision": decision,
+                    "reviewer": username,
+                    "notes": notes,
+                    "reviewed_at": now_iso,
+                    "risk_evaluation": rscore.to_dict(),
+                }
+
+                updated_fnd = security_store.save_finding(
+                    assessment_id=fnd["assessment_id"],
+                    title=fnd["title"],
+                    category=fnd["category"],
+                    severity=current_sev,
+                    confidence=current_conf,
+                    description=fnd["description"],
+                    cwe=fnd["cwe"],
+                    risk_score=rscore.overall_score,
+                    technical_evidence=fnd["evidence"],
+                    status=new_status,
+                    human_review=human_review_data,
+                    workspace_id=fnd["workspace_id"],
+                    finding_id=f_id,
+                )
+
+                security_store.log_audit_event(
+                    event_type="finding_reviewed",
+                    actor=username,
+                    target_ref=f_id,
+                    details={"decision": decision, "status": new_status, "risk_score": rscore.overall_score},
+                    workspace_id=fnd["workspace_id"],
+                    actor_user_id=actor_id,
+                )
+                self._send(200, {"finding": updated_fnd})
+                return
+
+            # --- Prompt Injection Defense API ---
+            if path == "/api/defense/inspect":
+                text = payload.get("text", "")
+                if not isinstance(text, str):
+                    raise RequestError(400, "Text is required.")
+                res = prompt_defense.inspect_text_for_injection(text)
+                self._send(200, res.to_dict())
+                return
+
+            # --- Benchmark Execution API ---
+            if path == "/api/benchmarks/run":
+                if not self._require_roles(ANALYZE_ROLES):
+                    return
+                bench_res = benchmark_engine.run_benchmark_suite()
+                security_store.save_benchmark_run(bench_res, workspace_id=scope or "default")
+                security_store.log_audit_event(
+                    event_type="benchmark_run_executed",
+                    actor=username,
+                    target_ref=bench_res["run_id"],
+                    details={"cases": bench_res["total_test_cases"], "time_ms": bench_res["execution_time_ms"]},
+                    workspace_id=scope or "default",
+                    actor_user_id=actor_id,
+                )
+                self._send(200, {"benchmark": bench_res})
+                return
+
             self._send(404, {"error": "Not found."})
         except Exception as exc:
             self._send_api_error(exc, "POST")
@@ -588,4 +988,5 @@ if __name__ == "__main__":
     if bind_host not in {"127.0.0.1", "0.0.0.0"}:
         raise SystemExit("MIZAN_BIND_HOST must be 127.0.0.1 or 0.0.0.0.")
     review_store.init_db()
+    security_store.init_security_db()
     ThreadingHTTPServer((bind_host, port), Handler).serve_forever()
