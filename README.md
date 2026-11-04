@@ -323,6 +323,8 @@ The project team has also exercised Mizan on real security-review workflows and 
 
 The automated suite covers evidence integrity, prompt-injection boundaries, authentication, authorization, workspace isolation, encrypted key storage, API behavior, persistence, Phantom import, and safe failure handling.
 
+The live service validation suite also completed **45/45 real HTTP checks** against an isolated Mizan server with temporary SQLite storage. It covered authentication, roles, workspace isolation, case persistence, bilingual offline triage, local static analysis, Phantom signing/provenance, token rotation, revocation, and safe error responses. Read the full [Live Validation Report](docs/LIVE_TEST_REPORT.md) or reproduce it with [`scripts/live_validation.py`](scripts/live_validation.py). The run used synthetic data and intentionally made zero external Meta or target requests.
+
 ## Explore the build
 
 - [Architecture and trust boundaries](docs/ARCHITECTURE.md)
