@@ -65,6 +65,24 @@ def _optional_positive_int(obj, key):
     return value
 
 
+def _provenance(recon):
+    """Keep compact, inspectable source metadata without treating it as proof."""
+    source_bytes = recon.get("source_bytes")
+    if source_bytes is None:
+        source_bytes = 0
+    if type(source_bytes) is not int or source_bytes < 0 or source_bytes > 2_000_000:
+        raise ValueError("Phantom field 'source_bytes' must be a bounded non-negative integer.")
+    allowed = {
+        "analysis_status": _text(recon, "analysis_status", limit=64),
+        "analysis_engine": _text(recon, "analysis_engine", limit=128),
+        "analysis_config": _text(recon, "analysis_config", limit=256),
+        "source_sha256": _text(recon, "source_sha256", limit=128),
+        "source_bytes": source_bytes,
+        "lines_of_code": _optional_positive_int(recon, "lines_of_code") or 0,
+    }
+    return {key: value for key, value in allowed.items() if value not in ("", None)}
+
+
 def _finding(value, index):
     if not isinstance(value, dict):
         raise ValueError("Phantom vulnerability %d must be an object." % index)
@@ -149,6 +167,7 @@ def phantom_result_to_preview(result, *, language="en", user_code=""):
         "target_type_as_reported": target_type,
         "risk_rating_claim": _text(result, "risk_rating", limit=100),
         "tech_stack_claim": tech_stack,
+        "analysis_provenance": _provenance(recon),
     }
     imported = {
         "format": IMPORT_FORMAT,

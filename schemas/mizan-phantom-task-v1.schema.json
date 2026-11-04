@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aimenhamzi01-dot/phantom/blob/main/schemas/mizan-phantom-task-v1.schema.json",
+  "title": "Mizan to Phantom signed task",
+  "type": "object",
+  "required": ["format", "task_id", "target", "target_type", "scope", "execution", "signature_algorithm", "signature"],
+  "properties": {
+    "format": {"const": "mizan-phantom-task-v1"},
+    "task_id": {"type": "string"},
+    "target": {"type": "string", "minLength": 1, "maxLength": 512},
+    "target_type": {"enum": ["web", "code", "mobile", "hardware"]},
+    "scope": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "string"}},
+    "execution": {"type": "object"},
+    "signature_algorithm": {"const": "HMAC-SHA256"},
+    "signature": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "additionalProperties": true
+}
