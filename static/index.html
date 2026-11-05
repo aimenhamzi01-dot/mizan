@@ -44,6 +44,7 @@ footer{color:var(--muted);font-size:.76rem;margin-top:22px;text-align:center}cod
 .auth-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:18px;background:rgba(3,8,16,.88);backdrop-filter:blur(8px)}
 .auth-card{width:min(100%,430px);padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
 .auth-card h2{margin:0 0 8px}.auth-card p{color:var(--muted);font-size:.86rem}.auth-card input{width:100%;margin:8px 0 12px}.auth-card button{width:100%}.auth-message{min-height:1.4em;color:#ffc6c6!important;margin-bottom:0}
+.model-catalog{display:grid;gap:8px}.model-entry{border:1px solid var(--line);border-radius:9px;background:var(--panel2);padding:10px}.model-entry strong{display:block;font-size:.82rem}.model-entry small{display:block;color:var(--muted);margin-top:3px;font-size:.74rem}.model-entry .status{display:inline-block;margin-top:5px}
 </style>
 </head>
 <body>
@@ -77,6 +78,13 @@ footer{color:var(--muted);font-size:.76rem;margin-top:22px;text-align:center}cod
       <div class="field"><label for="modelKeyInput">Meta Model API key</label><input id="modelKeyInput" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false" maxlength="512" placeholder="Paste your personal key"></div>
       <div class="actions"><button class="btn primary" id="saveModelKeyBtn" type="submit">Save encrypted key</button><button class="btn ghost" id="deleteModelKeyBtn" type="button">Remove my key</button></div>
     </form>
+    <div class="section" id="modelHubPanel">
+      <h3>Meta Intelligence Hub · model registry</h3>
+      <p class="hint">Muse Spark remains the default. Only registry-approved adapters are selectable. Hosted APIs, experimental models, and downloaded/self-hosted weights are identified separately. Models marked pending cannot receive reports or make network calls from Mizan.</p>
+      <div class="field"><label for="modelSelector">Model for the next analysis</label><select id="modelSelector" aria-describedby="modelSelectionHint"></select><small id="modelSelectionHint">Selection is held in this browser session and sent with explicit analysis consent.</small></div>
+      <div class="model-catalog" id="modelRegistryList" aria-live="polite"></div>
+      <p class="hint" id="localRuntimeStatus"></p>
+    </div>
   </article>
 
   <article id="adminCard" class="card" hidden>
@@ -141,7 +149,7 @@ footer{color:var(--muted);font-size:.76rem;margin-top:22px;text-align:center}cod
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
-const state = {hasKey:false, selectedId:null, reports:[], flashTimer:null, token:"", principal:null, analysisPending:null};
+const state = {hasKey:false, selectedId:null, reports:[], flashTimer:null, token:"", principal:null, analysisPending:null, modelHub:null, selectedModelId:null};
 const decisionLabels = {accept:"Accept", "need-info":"Need info", duplicate:"Duplicate", reject:"Reject"};
 
 function node(tag, className, text){
@@ -167,7 +175,7 @@ async function api(path, options={}){
   return body;
 }
 function lockWorkbench(message="Enter your personal access token to open the workbench."){
-  state.token="";state.hasKey=false;state.selectedId=null;state.reports=[];state.principal=null;
+  state.token="";state.hasKey=false;state.selectedId=null;state.reports=[];state.principal=null;state.modelHub=null;state.selectedModelId=null;
   $("authGate").hidden=false;$("lockBtn").hidden=true;$("judgeToken").value="";
   $("accountBadge").hidden=true;$("profileCard").hidden=true;$("adminCard").hidden=true;
   $("modelKeyInput").value="";$("issuedToken").textContent="";$("issuedToken").hidden=true;
@@ -199,9 +207,32 @@ async function loadProfile(){
   const account = $("accountBadge"); account.textContent = `${me.username} · ${me.role}`; account.hidden = false;
   $("profileCard").hidden = false;
   $("modelKeyStatus").textContent = me.has_model_key ? "Your personal key is saved, but Mizan has not tested it. Provider access is checked only when you explicitly run an analysis." : "No personal Meta API key is saved yet. Add one to enable live analysis.";
+  await loadModelHub();
   const canAdmin = me.role === "admin";
   $("adminCard").hidden = !canAdmin;
   if(canAdmin) await loadAdminPanel();
+}
+async function loadModelHub(){
+  const data=await api("/api/models");state.modelHub=data;
+  const selectable=(data.models||[]).filter(model=>model.selectable);
+  if(!state.selectedModelId||!selectable.some(model=>model.hub_id===state.selectedModelId))state.selectedModelId=data.default_model;
+  const selector=$("modelSelector");selector.replaceChildren();
+  (data.models||[]).forEach(model=>{
+    const label=model.family+(model.model_id?` · ${model.model_id}`:"")+(model.checkpoint_id?` · ${model.checkpoint_id}`:"");
+    const option=node("option","",label);option.value=model.hub_id;option.disabled=!model.selectable;selector.append(option);
+  });
+  selector.value=state.selectedModelId||data.default_model;
+  const list=$("modelRegistryList");list.replaceChildren();
+  (data.models||[]).forEach(model=>{
+    const card=node("div","model-entry");
+    card.append(node("strong","",model.family+(model.model_id?` · ${model.model_id}`:"")));
+    card.append(node("small","",`${model.availability.replaceAll("-"," ")} · ${model.integration.replaceAll("-"," ")} · ${model.interface.replaceAll("-"," ")}`));
+    card.append(node("small","",model.summary));
+    card.append(node("span",model.selectable?"status analyzed":"status received",model.selectable?"Selectable for security triage":"Pending / not callable"));
+    list.append(card);
+  });
+  const local=data.local_runtime||{};
+  $("localRuntimeStatus").textContent=`Local-model runtime: ${local.configured?"configuration detected":"not configured"}; adapter ${local.adapter_active?"active":"pending"}. Mizan does not send requests to local endpoints yet. Usage accounting: ${data.usage_tracking||"unavailable"}`;
 }
 async function loadAdminPanel(){
   const me = state.principal;
@@ -421,7 +452,9 @@ function renderDetail(report, events){
   const topActions = node("div", "actions");
   const analyzing = state.analysisPending === report.id;
   const anotherAnalysis = Boolean(state.analysisPending) && !analyzing;
-  const analyze = node("button", "btn primary", analyzing ? "Analysis in progress…" : anotherAnalysis ? "Wait for current analysis…" : report.analysis ? "Run analysis again" : "Analyze with Meta"); analyze.type = "button"; analyze.id = "analyzeButton";
+  const selectedModel=(state.modelHub?.models||[]).find(model=>model.hub_id===state.selectedModelId);
+  const selectedLabel=selectedModel?.model_id||selectedModel?.family||"Muse Spark";
+  const analyze = node("button", "btn primary", analyzing ? "Analysis in progress…" : anotherAnalysis ? "Wait for current analysis…" : report.analysis ? `Run again · ${selectedLabel}` : `Analyze · ${selectedLabel}`); analyze.type = "button"; analyze.id = "analyzeButton";
   analyze.disabled = !state.hasKey || report.status === "reviewed" || !["admin","analyst"].includes(state.principal?.role) || Boolean(state.analysisPending);
   analyze.addEventListener("click", ()=>analyzeReport(report.id));
   const challenge = node("button", "btn ghost", analyzing ? "Challenge in progress…" : anotherAnalysis ? "Wait for current analysis…" : report.analysis ? "Re-run analysis + cross-version challenge" : "Analyze + cross-version challenge"); challenge.type="button"; challenge.id="challengeButton";
@@ -460,16 +493,18 @@ function renderReview(parent, report){
 }
 async function analyzeReport(id,challengePass=false){
   if(state.analysisPending)return;
+  const selectedModel=(state.modelHub?.models||[]).find(model=>model.hub_id===state.selectedModelId);
+  const selectedLabel=selectedModel?.model_id||selectedModel?.family||"Muse Spark";
   const accepted=window.confirm(challengePass
-    ?"This runs the normal analysis plus a second Muse Spark pass using a different configured version when available. It is advisory, not independent verification. The report, code, and first analysis are sent again to your configured Meta endpoint; this extra request may increase token usage, latency, and provider charges. No target is contacted and no code is executed. Continue?"
-    :"This sends the selected report and supplied source snippet to the configured Meta Model API for Muse Spark analysis. High reasoning is used by default and may increase token use, latency, and provider charges; the configured effort is shown with the result. It does not contact the reported target or execute the code. Continue?");
+    ?`This runs ${selectedLabel} analysis plus a second advisory Muse Spark pass using a different configured version when available. The passes are not independent verification. The report, code, and first analysis are sent again to your configured Meta endpoint; this extra request may increase token usage, latency, and provider charges. No target is contacted and no code is executed. Continue?`
+    :`This sends the selected report and supplied source snippet to the configured Meta Model API using ${selectedLabel}. Provider access and account eligibility are not tested until this request. Usage, latency, and provider charges may vary. It does not contact the reported target or execute the code. Continue?`);
   if(!accepted)return;
   state.analysisPending=id;
   flash("Analysis is in progress and may take a while. Do not submit another analysis until this request finishes.","",true);
   const analyzeButton=$("analyzeButton"),challengeButton=$("challengeButton");
   if(analyzeButton){analyzeButton.disabled=true;analyzeButton.textContent="Analysis in progress…";}
   if(challengeButton){challengeButton.disabled=true;challengeButton.textContent=challengePass?"Challenge in progress…":"Wait for current analysis…";}
-  const payload={confirm_egress:true};if(challengePass){payload.challenge_pass=true;payload.confirm_challenge_egress=true;}
+  const payload={confirm_egress:true,model_id:state.selectedModelId};if(challengePass){payload.challenge_pass=true;payload.confirm_challenge_egress=true;}
   try{
     await api(`/api/reports/${encodeURIComponent(id)}/analyze`,{method:"POST",body:JSON.stringify(payload)});
     flash(challengePass?"Analysis and challenge pass complete. Review both before recording a human disposition.":"Analysis complete. Review the recommendation before recording a human disposition.");
@@ -519,6 +554,15 @@ $("previewPhantomBtn").addEventListener("click",async()=>{
 $("clearFormBtn").addEventListener("click",()=>{$("newReportForm").reset();setCounts();});
 $("reportInput").addEventListener("input",setCounts);$("codeInput").addEventListener("input",setCounts);
 $("refreshBtn").addEventListener("click",()=>refreshAll());
+$("modelSelector").addEventListener("change",()=>{
+  state.selectedModelId=$("modelSelector").value;
+  const selectedModel=(state.modelHub?.models||[]).find(model=>model.hub_id===state.selectedModelId);
+  const label=selectedModel?.model_id||selectedModel?.family||"Muse Spark";
+  const report=state.reports.find(item=>item.id===state.selectedId);
+  const button=$("analyzeButton");
+  if(button&&report)button.textContent=report.analysis?`Run again · ${label}`:`Analyze · ${label}`;
+  flash("Model selection updated for the next explicitly confirmed analysis. No model was called.");
+});
 $("statusFilter").addEventListener("change",loadReports);
 let searchTimer=null;$("searchInput").addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(loadReports,250);});
 document.querySelectorAll("[data-sample]").forEach(button=>button.addEventListener("click",()=>loadSample(button.dataset.sample)));

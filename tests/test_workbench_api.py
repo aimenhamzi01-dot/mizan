@@ -119,6 +119,41 @@ class WorkbenchAPITests(unittest.TestCase):
         self.assertNotIn("report", metrics)
         self.assertNotIn("code", metrics)
 
+    def test_model_registry_endpoint_is_authenticated_and_labels_pending_models(self):
+        status, _, body = self.request("/api/models")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["default_model"], "muse-spark-1.3")
+        self.assertEqual(len(payload["models"]), 13)
+        by_id = {item["hub_id"]: item for item in payload["models"]}
+        self.assertTrue(by_id["muse-spark-1.3"]["selectable"])
+        self.assertFalse(by_id["sam-3.1"]["selectable"])
+        self.assertEqual(by_id["sam-3.1"]["availability"], "gated-downloadable-weights")
+        self.assertEqual(by_id["muse-image-1.0"]["integration"], "pending-adapter-contract")
+        secret_fields = {"api_key", "endpoint", "base_url", "api_base"}
+        self.assertTrue(all(not (secret_fields & set(item)) for item in payload["models"]))
+        self.assertTrue(secret_fields.isdisjoint(payload["local_runtime"]))
+        status, _, _ = self.request("/api/models", auth=False)
+        self.assertEqual(status, 401)
+
+    def test_pending_model_selection_is_rejected_before_model_egress(self):
+        case = self.create_case(GOOD_REPORT, GOOD_CODE)
+        with patch.object(meta_client, "chat", side_effect=AssertionError("pending model must not call provider")):
+            status, _, body = self.request(
+                "/api/reports/%s/analyze" % case["id"],
+                {"confirm_egress": True, "model_id": "sam-3.1"}, method="POST",
+            )
+        self.assertEqual(status, 400)
+
+    def test_unknown_model_selection_is_rejected_before_model_egress(self):
+        case = self.create_case(GOOD_REPORT, GOOD_CODE)
+        with patch.object(meta_client, "chat", side_effect=AssertionError("unknown model must not call provider")):
+            status, _, _ = self.request(
+                "/api/reports/%s/analyze" % case["id"],
+                {"confirm_egress": True, "model_id": "not-a-model"}, method="POST",
+            )
+        self.assertEqual(status, 400)
+
     def test_container_healthcheck_is_public_and_minimal(self):
         status, _, body = self.request("/healthz", auth=False)
         self.assertEqual(status, 200)
@@ -233,6 +268,7 @@ class WorkbenchAPITests(unittest.TestCase):
 
         def fake_chat(messages, **kwargs):
             captured["messages"] = messages
+            captured["kwargs"] = kwargs
             return json.dumps(GOOD)
 
         with patch.object(meta_client, "chat", side_effect=AssertionError("missing consent must not call model")):
@@ -240,12 +276,15 @@ class WorkbenchAPITests(unittest.TestCase):
         self.assertEqual(status, 400)
         with patch.object(meta_client, "chat", side_effect=fake_chat):
             status, _, body = self.request(
-                "/api/reports/%s/analyze" % case["id"], {"confirm_egress": True}, method="POST"
+                "/api/reports/%s/analyze" % case["id"],
+                {"confirm_egress": True, "model_id": "muse-spark-1.2"}, method="POST"
             )
         self.assertEqual(status, 200)
         result = json.loads(body)["report"]
         self.assertEqual(result["suggested_decision"], "need-info")
         self.assertEqual(result["analysis"]["citation_integrity"], "verified")
+        self.assertEqual(result["analysis"]["analysis_meta"]["requested_model"], "muse-spark-1.2")
+        self.assertEqual(captured["kwargs"]["model_candidates"], ["muse-spark-1.2"])
         self.assertTrue(all(item["verified"] for item in result["analysis"]["evidence"]))
         self.assertIsNone(result["review_decision"])
         system_message, user_message = [message["content"] for message in captured["messages"]]

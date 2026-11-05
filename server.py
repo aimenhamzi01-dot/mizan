@@ -26,6 +26,7 @@ load_env()
 
 import auth_store  # noqa: E402
 import meta_client  # noqa: E402
+import model_hub  # noqa: E402
 import review_store  # noqa: E402
 import secret_store  # noqa: E402
 import triage  # noqa: E402
@@ -276,6 +277,11 @@ class Handler(BaseHTTPRequestHandler):
                     "is_root": self.principal.get("is_root", False), "has_model_key": own_key or env_key,
                 })
                 return
+            if path == "/api/models":
+                own_key = secret_store.has_user_api_key(self.principal["id"])
+                env_key = bool(self.principal.get("is_root") and meta_client.get_config()[0])
+                self._send(200, model_hub.public_registry(has_meta_key=own_key or env_key))
+                return
             if path == "/api/health":
                 self._send(200, {"ok": True, "has_key": bool(self._get_user_model_key()), "storage": "local-sqlite"})
                 return
@@ -335,6 +341,9 @@ class Handler(BaseHTTPRequestHandler):
             path = urlsplit(self.path).path
             scope = self._workspace_scope()
             username, actor_id = self._actor()
+            model_id = payload.get("model_id")
+            if model_id is not None and not isinstance(model_id, str):
+                raise RequestError(400, "model_id must be a registered model identifier string.")
 
             if path == "/api/admin/workspaces":
                 if not self.principal.get("is_root"):
@@ -401,12 +410,16 @@ class Handler(BaseHTTPRequestHandler):
                 if challenge_pass and payload.get("confirm_challenge_egress") is not True:
                     self._send(400, {"error": "Explicit confirmation for the additional challenge call is required."})
                     return
+                if model_id is not None:
+                    model_hub.resolve_model(model_id)
                 report, code, language = self._report_parts(payload)
                 api_key = self._get_user_model_key()
                 if not api_key:
                     self._send(409, {"error": "Add your own encrypted Meta API key in your account profile before analysis."})
                     return
-                self._send(200, triage.triage(report, code, language, api_key=api_key, challenge_pass=challenge_pass))
+                self._send(200, triage.triage(
+                    report, code, language, api_key=api_key, challenge_pass=challenge_pass, model_id=model_id,
+                ))
                 return
             if path == "/api/import/phantom/preview":
                 if not self._require_roles(ANALYZE_ROLES):
@@ -439,6 +452,8 @@ class Handler(BaseHTTPRequestHandler):
                 if challenge_pass and payload.get("confirm_challenge_egress") is not True:
                     self._send(400, {"error": "Explicit confirmation for the additional challenge call is required."})
                     return
+                if model_id is not None:
+                    model_hub.resolve_model(model_id)
                 saved = review_store.get_report(report_id, workspace_id=scope)
                 if saved["status"] == "reviewed":
                     raise review_store.InvalidState("A reviewed report cannot be re-analyzed; create a new report instead.")
@@ -448,7 +463,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 analysis = triage.triage(
                     saved["report"], saved["code"], saved["language"],
-                    api_key=api_key, challenge_pass=challenge_pass,
+                    api_key=api_key, challenge_pass=challenge_pass, model_id=model_id,
                 )
                 updated = review_store.save_analysis(report_id, analysis, actor=username, workspace_id=scope, actor_user_id=actor_id)
                 self._send(200, {"report": updated})

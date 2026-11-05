@@ -5,6 +5,7 @@ import re
 import time
 
 import meta_client
+import model_hub
 from prompts import (
     CHALLENGE_RESPONSE_FORMAT,
     CHALLENGE_SYSTEM,
@@ -329,7 +330,7 @@ def _run_challenge(report, code, language, analysis, api_key, primary_model="unk
         }
 
 
-def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False):
+def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False, model_id=None):
     report = (report or "").strip()
     if not report:
         raise ValueError("Paste the report text first.")
@@ -341,6 +342,7 @@ def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False):
         raise ValueError("Code context is too long (max %d characters)." % MAX_CODE)
     if not isinstance(challenge_pass, bool):
         raise ValueError("Challenge pass must be a boolean.")
+    selected_model = model_hub.resolve_model(model_id) if model_id else None
 
     language = lang_name(lang)
     # JSON-quote untrusted values so embedded newlines cannot forge the visible
@@ -363,13 +365,22 @@ def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False):
 
     last_err = None
     final_model, usage_total = "unknown", {}
+    requested_model = selected_model["model_id"] if selected_model else None
     final_reasoning_effort, final_output_format = "model-default", "unspecified"
     started = time.monotonic()
     for _ in range(2):
-        response = meta_client.chat(
-            messages, api_key=api_key, max_completion_tokens=6500, return_metadata=True,
-            response_format=TRIAGE_RESPONSE_FORMAT,
-        )
+        chat_kwargs = {
+            "api_key": api_key, "max_completion_tokens": 6500, "return_metadata": True,
+            "response_format": TRIAGE_RESPONSE_FORMAT,
+        }
+        if selected_model:
+            response, _ = model_hub.route_chat(
+                selected_model["hub_id"], model_hub.TASK_SECURITY_TRIAGE, messages, **chat_kwargs
+            )
+        else:
+            # Compatibility for existing clients keeps the configured Muse Spark
+            # fallback order. New UI requests use an explicit, single-model route.
+            response = meta_client.chat(messages, **chat_kwargs)
         reply = None
         try:
             reply, final_model, call_usage, final_reasoning_effort, final_output_format = _response_parts(response)
@@ -381,6 +392,13 @@ def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False):
                 response_format=TRIAGE_RESPONSE_FORMAT,
                 reasoning_effort=final_reasoning_effort, output_format=final_output_format,
             )
+            normalized["analysis_meta"].update({
+                "requested_model": requested_model,
+                "provider": "meta-hosted-api",
+                "adapter_id": selected_model["adapter"] if selected_model else "meta-chat-completions-legacy",
+                "registry_version": model_hub.REGISTRY_VERSION,
+                "cost_estimate": None,
+            })
             if challenge_pass:
                 challenge = _run_challenge(report, code, language, normalized, api_key, final_model)
                 normalized["challenge_pass"] = challenge

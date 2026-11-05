@@ -61,6 +61,12 @@ The default model order is `muse-spark-1.3`, `muse-spark-1.2`, then `muse-spark-
 
 Structured generation constrains the response shape, not its truth. The server independently checks the literal presence and source attribution of each quote and applies fail-closed rules; any incomplete schema or unverifiable quote downgrades the suggestion to `need-info`. A text match does not prove that a quote is relevant, complete, true, reachable, or sufficient to establish exploitability. Mizan records the resolved model, reasoning effort, requested output format, prompt/schema fingerprint, elapsed time, and token usage when supplied by the API.
 
+### Meta Intelligence Hub: registry, routing, and status
+
+The authenticated **Meta Intelligence Hub** panel is backed by `model_hub.py`; `GET /api/models` returns the same key-free registry used by the UI and router. Muse Spark 1.3 remains the default. Spark 1.2 and 1.1 are selectable when enabled by the installation's configured model order. Muse Wonder is an experimental opt-in only (`MIZAN_ENABLED_MODELS=muse-wonder-1.0`) and still depends on provider account access; Mizan does not silently fall back to a different family. Each analysis request carries the selected registry ID, is checked against the supported task and operator allowlist, and reaches the current Meta Chat Completions adapter as a single explicit candidate.
+
+The registry distinguishes working hosted text routing from pending interfaces and local weights. Muse Image, Muse Voice Transcribe, SAM 3.1, Muse Glimmer, Muse Spark Open, and Llama/open-weight models are visible for architecture and status, but are **not callable**: Mizan does not invent image/audio/SAM endpoints or treat checkpoint IDs as hosted API model IDs. The installed UI explicitly marks gated/downloadable weights, experimental integrations, and pending adapters. Local endpoint settings, if present, are informational only; a local model adapter is not active. Provider token counts are recorded only when returned; dollar costs are deliberately not estimated without a verified current pricing source. Multi-model comparison is not automatic, and every outbound analysis still requires explicit consent.
+
 ## Run Mizan locally
 
 **Requirements:** Docker Engine and Docker Compose v2. Python-only operation is also available; see [Python setup](#python-only-setup).
@@ -77,7 +83,7 @@ The app binds to loopback by default. `docker compose down` preserves the databa
 
 ### Enable live Muse Spark analysis
 
-Live use requires a Meta Model API key that the researcher is authorized to use; Mizan does not issue or share keys. Obtain provider access through the [Meta developer platform](https://dev.meta.ai/), sign in to Mizan, and save the key under **Your Meta API key**. Saving a key does not test it or send data. To perform a live test, save a built-in synthetic report, select it, choose **Analyze with Meta**, and confirm the data transfer. Each researcher is responsible for provider usage and any charges. The optional challenge pass makes an additional model request.
+Live use requires a Meta Model API key that the researcher is authorized to use; Mizan does not issue or share keys. Obtain provider access through the [Meta developer platform](https://dev.meta.ai/), sign in to Mizan, and save the key under **Your Meta API key**. Saving a key does not test it or send data. To perform a live test, save a built-in synthetic report, select it, choose the desired enabled model in the Hub (Muse Spark 1.3 is the default), then select the model-labelled Analyze button and confirm the data transfer. Each researcher is responsible for provider usage and any charges. The optional challenge pass makes an additional model request.
 
 The default endpoint is `https://api.meta.ai/v1`. Remote endpoints must use HTTPS; Mizan does not follow redirects, so configure the final trusted API URL directly. Cleartext HTTP is allowed only for loopback development endpoints. A saved key is not proof that the provider account, model access, or billing is active; the first explicit analysis is the connectivity check.
 
@@ -145,6 +151,7 @@ The evaluation command validates a small bundled set of synthetic English and Ar
 |---|---|
 | `server.py` | HTTP API, authentication, workspace RBAC, and explicit egress controls |
 | `triage.py`, `prompts.py` | Model workflow, untrusted-input boundary, normalization, and evidence checks |
+| `model_hub.py` | Central registry, capability/task policy, enablement, and single-model Meta router |
 | `meta_client.py` | Meta-compatible Model API client and response metadata |
 | `auth_store.py`, `secret_store.py` | Workspace identities, token digests, and encrypted personal model keys |
 | `review_store.py` | SQLite migrations, workspace-scoped reports, audit events, and metrics |

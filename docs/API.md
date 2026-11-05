@@ -70,6 +70,12 @@ curl "${AUTH[@]}" -X DELETE http://127.0.0.1:8000/api/me/model-key
 
 Do not place a real key in shell history. Prefer the profile panel in the UI. The installation-owner token may use the legacy `MODEL_API_KEY` environment fallback; ordinary user tokens never inherit it. `MIZAN_ENCRYPTION_KEY` must remain private and backed up with the database.
 
+## Meta Intelligence Hub registry
+
+`GET /api/models` is authenticated and returns the installed registry version, default model ID, safe model metadata, per-model `enabled`/`selectable` flags, availability/integration labels, supported tasks and modalities, whether a personal credential is configured, local-runtime configuration status, and the current usage-accounting limitation. It never returns API keys, endpoint URLs, or provider secrets. Registry rows include implemented hosted text models, an experimental opt-in, unverified/pending API integrations, and gated/downloadable local checkpoints. `selectable: false` means the model cannot be called by Mizan; listing a checkpoint is not a claim that a hosted endpoint exists.
+
+The authenticated UI loads this endpoint and lets the researcher select among enabled models for the next analysis. The default remains `muse-spark-1.3`. A model selection is not persisted to the case and does not itself call a provider. Local runtime fields are informational until a reviewed local adapter is implemented. Token usage is recorded if the provider returns counts; dollar cost and automatic cross-model comparisons are not currently provided.
+
 ## Health and queue
 
 ```bash
@@ -126,8 +132,10 @@ The authenticated analyst uses their own saved Meta key. The API requires explic
 
 ```bash
 curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports/CASE_ID/analyze \
-  -H 'Content-Type: application/json' -d '{"confirm_egress":true}'
+  -H 'Content-Type: application/json' -d '{"confirm_egress":true,"model_id":"muse-spark-1.2"}'
 ```
+
+`model_id` is optional; if omitted, the configured default is used (Muse Spark 1.3 by default). It must be a registry `hub_id` enabled for the `security-triage` task. Unknown, pending, disabled, or task-incompatible IDs return HTTP 400 before any model request. For example, `sam-3.1` is a visible local checkpoint entry but is not a callable model. The route passes the chosen hosted model as a single candidate, so Mizan does not silently switch families or versions after selection. `POST /api/triage` accepts the same optional field.
 
 The selected report and source snippet are sent to the configured `META_API_BASE`. Remote endpoints must use HTTPS; redirects are rejected, so configure the final trusted endpoint URL directly. The analysis stores a model recommendation and never sets a human disposition. Saving a report alone is always local-only. Mizan requests a strict Meta `response_format` JSON Schema and defaults to `reasoning_effort: high`; the operator may lower it using `META_REASONING_EFFORT`. Higher reasoning can increase latency, output tokens, and provider charges. Mizan leaves temperature unset to use Meta's Muse Spark default. The response includes `analysis_meta` with the resolved model identifier (when supplied by the provider), prompt/schema version and SHA-256 fingerprint, requested output format, reasoning effort, elapsed milliseconds, and allowlisted token counts when available. It does not include the prompt content or API key.
 
@@ -203,6 +211,7 @@ Case deletion requires admin role in the relevant workspace (or the installation
 ## Routes and errors
 
 - `GET /api/sample?kind=injection|valid|noise&lang=en|ar` — synthetic sample input (any authenticated role).
+- `GET /api/models` — authenticated, key-free Meta model registry and current enablement status.
 - `GET /api/reports` — bounded workspace-scoped summaries with `status`, `q`, `limit`, and `offset` filters.
 - `GET /api/reports/{id}` and `/history` — workspace-scoped detail and events.
 - `GET /api/metrics` — counts scoped to the active workspace.
