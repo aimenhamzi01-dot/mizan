@@ -51,6 +51,41 @@ class Phase2B(unittest.TestCase):
         self.assertTrue(all(item["human_confirmation_required"] for item in candidates))
         self.assertEqual(self.enrich(existing=existing)["decision"], "accept")
 
+    def test_weak_duplicate_candidate_does_not_downgrade_supported_finding(self):
+        existing = [{"id": "weak", "report": "IDOR on /api/invoices/1058 exposes another user's invoice", "code": CODE}]
+        result = self.enrich(existing=existing)
+        intelligence = result["triage_intelligence"]
+        self.assertEqual(intelligence["classification"]["label"], "supported-finding")
+        self.assertEqual(intelligence["duplicate"]["status"], "possible-duplicate")
+        self.assertTrue(intelligence["duplicate"]["human_confirmation_required"])
+        self.assertEqual(result["decision"], "accept")
+
+    def test_different_vulnerability_types_with_generic_shared_code_are_not_duplicates(self):
+        existing = [{"id": "generic", "report": "SQL injection on /search", "code": "def handle(request): return response"}]
+        result = self.enrich(existing=existing)
+        self.assertEqual(result["triage_intelligence"]["duplicate"]["status"], "no-duplicate-candidate")
+        self.assertEqual(result["triage_intelligence"]["duplicate"]["candidate_count"], 0)
+
+    def test_genuine_duplicate_exposes_strongest_candidate_and_signals(self):
+        existing = [{"id": "genuine", "report": REPORT, "code": CODE}]
+        duplicate = self.enrich(existing=existing)["triage_intelligence"]["duplicate"]
+        self.assertEqual(duplicate["status"], "possible-duplicate")
+        self.assertEqual(duplicate["candidate_count"], 1)
+        self.assertEqual(duplicate["strongest_candidate"]["report_id"], "genuine")
+        self.assertIn("relevant_code", duplicate["matching_signals"])
+
+    def test_no_duplicate_candidates_have_neutral_status(self):
+        duplicate = self.enrich(existing=[{"id": "other", "report": "Reflected XSS on /search", "code": "return mark_safe(q)"}])["triage_intelligence"]["duplicate"]
+        self.assertEqual(duplicate["status"], "no-duplicate-candidate")
+        self.assertIsNone(duplicate["strongest_candidate"])
+        self.assertFalse(duplicate["human_confirmation_required"])
+
+    def test_human_disposition_value_is_not_changed_by_enrichment(self):
+        data = copy.deepcopy(BASE)
+        data["review_decision"] = "reject"
+        result = self.enrich(data, existing=[{"id": "weak", "report": REPORT, "code": CODE}])
+        self.assertEqual(result["review_decision"], "reject")
+
     def test_false_positive_classification_and_contradiction(self):
         data = copy.deepcopy(BASE)
         data.update({"code_verification": "contradicted", "decision": "reject"})

@@ -471,6 +471,10 @@ function renderTriageIntelligence(parent, intelligence){
   const grid=node("div","result-grid"), classification=intelligence.classification||{}, priority=intelligence.prioritization||{};
   addField(grid,"Classification",`${classification.label||"unknown"} · not a final disposition`);
   addField(grid,"Classification basis",(classification.basis||[]).join("\n")||"No basis reported.",true,true);
+  const duplicate=intelligence.duplicate||{};
+  addField(grid,"Duplicate status",`${duplicate.status||"unknown"} · ${duplicate.candidate_count??0} candidate(s) · human confirmation required: ${duplicate.human_confirmation_required!==false}`);
+  addField(grid,"Strongest duplicate",duplicate.strongest_candidate?`${duplicate.strongest_candidate.report_id||"unknown"} · similarity ${duplicate.similarity_score??0}`:"No candidate.",true);
+  addField(grid,"Duplicate matching signals",Object.entries(duplicate.matching_signals||{}).map(([key,value])=>`${key}: ${value}`).join("\n")||"No matching signals.",true,true);
   addField(grid,"Review priority",`${priority.band||"unknown"} · score ${priority.score??"—"}/100`);
   const factors=priority.factors||{};
   addField(grid,"Priority factors",Object.entries(factors).map(([key,value])=>`${key}: ${value===null?"not applicable":value}`).join("\n")||"No factors reported.",true,true);

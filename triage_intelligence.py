@@ -113,9 +113,13 @@ def _similarity(current: dict, other: dict) -> tuple[float, list[str], dict]:
         0.20 * signals["vulnerability_type"] + 0.15 * signals["affected_asset"] +
         0.10 * signals["root_cause"] + 0.10 * code_score
     )
-    # A shared endpoint alone is not enough. Require a technical type/root/code
-    # match, or very strong text and vocabulary agreement.
-    eligible = bool(type_overlap or root_overlap or code_score >= 0.60 or (report_text_score >= 0.82 and vocabulary_score >= 0.55))
+    # A shared endpoint or generic shared code alone is not enough. Code
+    # similarity needs corroborating technical context from type, root cause,
+    # vocabulary, or report text.
+    code_context = code_score >= 0.60 and bool(
+        type_overlap or root_overlap or report_text_score >= 0.45 or vocabulary_score >= 0.35
+    )
+    eligible = bool(type_overlap or root_overlap or code_context or (report_text_score >= 0.82 and vocabulary_score >= 0.55))
     return min(1.0, score), reasons, {"signals": signals, "eligible": eligible}
 
 
@@ -145,7 +149,7 @@ def duplicate_candidates(report: str, code: str, existing_reports: list[dict] | 
     return candidates[:limit]
 
 
-def classify(analysis: dict, duplicate_candidates: list[dict] | None = None) -> dict:
+def classify(analysis: dict) -> dict:
     """Map advisory fields to a review label without changing the disposition."""
     verification = analysis.get("code_verification")
     citation = analysis.get("citation_integrity")
@@ -155,8 +159,6 @@ def classify(analysis: dict, duplicate_candidates: list[dict] | None = None) -> 
     reasoning = _text(analysis.get("decision_reasoning"), analysis.get("claimed_impact"), *analysis.get("missing_context", []))
     if verification == "contradicted":
         label = "technically-contradicted"
-    elif decision == "duplicate" or duplicate_candidates:
-        label = "duplicate-candidate"
     elif any(term in reasoning for term in ("out of scope", "out-of-scope", "not in scope", "خارج النطاق")):
         label = "out-of-scope"
     elif noise == "scanner-dump":
@@ -254,6 +256,19 @@ def prioritize(analysis: dict, missing: list[dict], contradictions_found: list[d
     }
 
 
+def duplicate_status(candidates: list[dict]) -> dict:
+    """Summarize duplicate analysis without changing technical classification."""
+    strongest = candidates[0] if candidates else None
+    return {
+        "status": "possible-duplicate" if strongest else "no-duplicate-candidate",
+        "candidate_count": len(candidates),
+        "strongest_candidate": strongest,
+        "similarity_score": strongest["similarity"] if strongest else 0.0,
+        "matching_signals": strongest.get("signals", {}) if strongest else {},
+        "human_confirmation_required": bool(strongest),
+    }
+
+
 def enrich(analysis: dict, report: str, code: str = "", existing_reports: list[dict] | None = None) -> dict:
     """Attach Phase 2B review aids to a normalized analysis."""
     result = dict(analysis)
@@ -262,8 +277,9 @@ def enrich(analysis: dict, report: str, code: str = "", existing_reports: list[d
     candidates = duplicate_candidates(report, code, existing_reports)
     result["triage_intelligence"] = {
         "schema_version": "phase-2b.1-v1",
-        "classification": classify(result, candidates),
+        "classification": classify(result),
         "duplicate_candidates": candidates,
+        "duplicate": duplicate_status(candidates),
         "prioritization": prioritize(result, missing, contradictions_found),
         "missing_evidence": missing,
         "contradictions": contradictions_found,
