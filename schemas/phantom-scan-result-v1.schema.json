@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aimenhamzi01-dot/phantom/blob/main/schemas/phantom-scan-result-v1.schema.json",
+  "title": "Phantom evidence result imported by Mizan",
+  "type": "object",
+  "required": ["target", "target_type", "scan_id", "timestamp", "recon", "vulnerabilities"],
+  "properties": {
+    "target": {"type": "string", "minLength": 1, "maxLength": 512},
+    "target_type": {"enum": ["web", "code", "mobile", "hardware"]},
+    "scan_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "recon": {"type": "object", "additionalProperties": true},
+    "vulnerabilities": {"type": "array", "maxItems": 25, "items": {"type": "object"}},
+    "tech_stack": {"type": "array", "items": {"type": "string"}},
+    "risk_rating": {"type": "string"}
+  },
+  "additionalProperties": true
+}

@@ -617,6 +617,74 @@ class WorkbenchAPITests(unittest.TestCase):
             stored = conn.execute("SELECT ciphertext FROM user_api_keys WHERE user_id=?", (analyst["user"]["id"],)).fetchone()[0]
         self.assertNotIn(personal_key.encode(), bytes(stored))
 
+    def test_phantom_task_manifest_requires_consent_and_analyst_role(self):
+        body = {
+            "target": "https://scope.example.org/app",
+            "target_type": "web",
+            "scope": ["xss", "idor"],
+            "authorized_scope": True,
+        }
+        status, _, response = self.request("/api/phantom/tasks/manifest", body, method="POST")
+        self.assertEqual(status, 201)
+        manifest = json.loads(response)["manifest"]
+        self.assertEqual(manifest["format"], "mizan-phantom-task-v1")
+        self.assertFalse(manifest["execution"]["automatic_execution"])
+        self.assertFalse(manifest["execution"]["network_access_by_mizan"])
+
+        body["authorized_scope"] = False
+        status, _, _ = self.request("/api/phantom/tasks/manifest", body, method="POST")
+        self.assertEqual(status, 400)
+
+        viewer = self.create_user("phantom.viewer", "viewer")
+        body["authorized_scope"] = True
+        status, _, _ = self.request(
+            "/api/phantom/tasks/manifest", body, method="POST", token=viewer["token"]
+        )
+        self.assertEqual(status, 403)
+
+    def test_local_static_analysis_is_workspace_scoped_and_does_not_need_model_key(self):
+        analyst = self.create_user("local.static", "analyst")
+        case = self.create_case(
+            report="Possible SQL injection in query construction.",
+            code='cursor.execute(f"SELECT * FROM users WHERE id={user_id}")',
+        )
+        with patch.object(meta_client, "chat", side_effect=AssertionError("local checks must not call Meta")):
+            status, _, body = self.request(
+                "/api/reports/%s/static-analysis" % case["id"], {"language": "python"},
+                method="POST", token=analyst["token"],
+            )
+        self.assertEqual(status, 201)
+        report = json.loads(body)["report"]
+        self.assertIsNone(report["analysis"])
+        self.assertEqual(len(report["static_analysis_runs"]), 1)
+        result = report["static_analysis_runs"][0]["result"]
+        self.assertEqual(result["mode"], "offline-source-text-only")
+        self.assertIn("MIZAN-SQL-FSTRING", {item["rule_id"] for item in result["findings"]})
+        self.assertFalse(result["findings"][0]["verified"])
+
+        other_workspace = self.create_workspace("Static checks isolated")
+        other_analyst = self.create_user("static.other", "analyst", other_workspace["id"])
+        status, _, _ = self.request(
+            "/api/reports/%s/static-analysis" % case["id"], {"language": "python"},
+            method="POST", token=other_analyst["token"],
+        )
+        self.assertEqual(status, 404)
+
+        viewer = self.create_user("static.viewer", "viewer")
+        status, _, _ = self.request(
+            "/api/reports/%s/static-analysis" % case["id"], {"language": "python"},
+            method="POST", token=viewer["token"],
+        )
+        self.assertEqual(status, 403)
+
+    def test_local_static_analysis_requires_saved_code(self):
+        case = self.create_case(code="")
+        status, _, body = self.request(
+            "/api/reports/%s/static-analysis" % case["id"], {"language": "python"}, method="POST"
+        )
+        self.assertEqual(status, 409)
+        self.assertIn(b"no supplied source code", body)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

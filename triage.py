@@ -6,6 +6,7 @@ import time
 
 import meta_client
 import model_hub
+import triage_intelligence
 from prompts import (
     CHALLENGE_RESPONSE_FORMAT,
     CHALLENGE_SYSTEM,
@@ -154,6 +155,8 @@ def normalize(data, report="", code=""):
     # integrity; it does not establish semantic relevance or report truth.
     if verify == "contradicted" and decision == "accept":
         decision = "reject"
+    if verify == "unverifiable" and decision == "accept":
+        decision = "need-info"
     if noise == "scanner-dump" and decision == "accept":
         decision = "need-info"
     decision_reasoning = str(data.get("decision_reasoning", ""))[:500]
@@ -330,7 +333,7 @@ def _run_challenge(report, code, language, analysis, api_key, primary_model="unk
         }
 
 
-def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False, model_id=None):
+def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False, model_id=None, existing_reports=None):
     report = (report or "").strip()
     if not report:
         raise ValueError("Paste the report text first.")
@@ -407,7 +410,7 @@ def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False, 
                     normalized["decision"] = "need-info"
                     note = " The optional second-pass challenge raised a concern or could not reach a clear conclusion; human review is required."
                     normalized["decision_reasoning"] = (normalized["decision_reasoning"] + note).strip()[:500]
-            return normalized
+            return triage_intelligence.enrich(normalized, report, code, existing_reports)
         except (ValueError, json.JSONDecodeError) as e:
             last_err = e
             if not isinstance(reply, str):

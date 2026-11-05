@@ -8,6 +8,7 @@ workspace scope for non-administrator users.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sqlite3
 import uuid
@@ -20,7 +21,7 @@ MAX_REPORT_CHARS = 20_000
 MAX_CODE_CHARS = 40_000
 MAX_REVIEWER_CHARS = 120
 MAX_NOTE_CHARS = 4_000
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class StoreError(Exception):
@@ -92,7 +93,7 @@ def _columns(conn, table: str) -> set[str]:
 
 
 def init_db() -> None:
-    """Create/migrate the local schema to v2 in a transaction; safe to repeat."""
+    """Create/migrate the local schema to v3 in a transaction; safe to repeat."""
     with _connect() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
         version = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -151,6 +152,14 @@ def init_db() -> None:
             "CREATE TABLE IF NOT EXISTS user_api_keys ("
             "user_id TEXT PRIMARY KEY, nonce BLOB NOT NULL, ciphertext BLOB NOT NULL, updated_at TEXT NOT NULL)"
         )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS static_analysis_runs ("
+            "run_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE, "
+            "created_at TEXT NOT NULL, actor TEXT NOT NULL, actor_user_id TEXT, "
+            "language TEXT NOT NULL, source_sha256 TEXT NOT NULL, result_json TEXT NOT NULL)"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_static_runs_report ON static_analysis_runs(report_id, run_id DESC)")
         conn.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
 
 
@@ -284,9 +293,52 @@ def get_report(report_id: str, *, workspace_id: str | None = None) -> dict:
     init_db()
     with _connect() as conn:
         row = _scoped_row(conn, report_id, workspace_id)
+        runs = [] if row is None else conn.execute(
+            "SELECT run_id, created_at, actor, actor_user_id, language, source_sha256, result_json "
+            "FROM static_analysis_runs WHERE report_id=? ORDER BY run_id DESC LIMIT 10", (report_id,),
+        ).fetchall()
     if row is None:
         raise NotFound("Report not found.")
-    return _row_to_report(row)
+    report = _row_to_report(row)
+    report["static_analysis_runs"] = [
+        {"run_id": item["run_id"], "created_at": item["created_at"], "actor": item["actor"],
+         "actor_user_id": item["actor_user_id"], "language": item["language"],
+         "source_sha256": item["source_sha256"], "result": json.loads(item["result_json"])}
+        for item in runs
+    ]
+    return report
+
+
+def save_static_analysis(
+    report_id: str, language: str, result: dict, actor: str, *,
+    workspace_id: str | None = None, actor_user_id: str | None = None,
+) -> dict:
+    """Persist a local source-text analysis separately from model and human decisions."""
+    if not isinstance(result, dict) or not isinstance(result.get("source_sha256"), str):
+        raise ValueError("Static analysis result is invalid.")
+    if not isinstance(language, str) or not language:
+        raise ValueError("Static analysis language is required.")
+    result_json = _json(result)
+    now = _now()
+    init_db()
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = _scoped_row(conn, report_id, workspace_id)
+        if row is None:
+            raise NotFound("Report not found.")
+        if row["status"] == "reviewed":
+            raise InvalidState("A reviewed report cannot receive new static-analysis runs; create a new report instead.")
+        if not row["code"]:
+            raise InvalidState("This report has no supplied source code to analyze.")
+        expected_hash = hashlib.sha256(row["code"].encode("utf-8")).hexdigest()
+        if result["source_sha256"] != expected_hash:
+            raise InvalidState("The source changed; rerun static analysis on the current report.")
+        conn.execute(
+            "INSERT INTO static_analysis_runs(report_id, created_at, actor, actor_user_id, language, source_sha256, result_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (report_id, now, actor[:MAX_REVIEWER_CHARS], actor_user_id, language, expected_hash, result_json),
+        )
+    return get_report(report_id, workspace_id=workspace_id)
 
 
 def list_reports(
@@ -327,6 +379,34 @@ def list_reports(
         {"id": row["id"], "created_at": row["created_at"], "updated_at": row["updated_at"],
          "language": row["language"], "summary": row["report"][:180], "status": row["status"],
          "suggested_decision": row["suggested_decision"], "review_decision": row["review_decision"]}
+        for row in rows
+    ]
+
+
+def list_report_contexts(*, workspace_id: str = "default", exclude_id: str = "", limit: int = 100) -> list:
+    """Return bounded workspace-scoped text for deterministic duplicate review."""
+    init_db()
+    try:
+        limit = max(1, min(int(limit), 100))
+    except (TypeError, ValueError):
+        raise ValueError("Limit must be an integer.")
+    where = ["w.workspace_id = ?"]
+    args = [workspace_id]
+    if exclude_id:
+        where.append("r.id != ?")
+        args.append(exclude_id)
+    sql = (
+        "SELECT r.id, r.report, r.code, r.analysis_json, r.status, r.updated_at "
+        "FROM reports r JOIN report_workspaces w ON w.report_id=r.id "
+        "WHERE " + " AND ".join(where) + " ORDER BY r.updated_at DESC, r.id LIMIT ?"
+    )
+    args.append(limit)
+    with _connect() as conn:
+        rows = conn.execute(sql, args).fetchall()
+    return [
+        {"id": row["id"], "report": row["report"], "code": row["code"],
+         "analysis": json.loads(row["analysis_json"]) if row["analysis_json"] else None,
+         "status": row["status"], "updated_at": row["updated_at"]}
         for row in rows
     ]
 

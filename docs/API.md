@@ -87,6 +87,8 @@ curl "${AUTH[@]}" http://127.0.0.1:8000/api/metrics
 
 `GET /healthz` is unauthenticated for container health checks and returns only `{"ok":true}`. `/api/health` returns `ok`, boolean `has_key`, and storage type. It never returns credentials. List responses are bounded summaries; metrics contain workspace-scoped counts only.
 
+Assessment target scopes require an absolute, timezone-aware `expires_at` timestamp in ISO-8601 format. Missing, malformed, naive, or expired authorization timestamps fail closed and prevent reconnaissance or scanning. Example target payloads should include a value such as `"expires_at":"2099-01-01T00:00:00Z"`.
+
 ## Save a case locally
 
 An analyst submits a case to their own workspace; it is stored as text and no model call is made:
@@ -98,6 +100,18 @@ curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports \
 ```
 
 The installation owner may include `workspace_id` to assign a case; an ordinary analyst cannot select another workspace. The returned case has `status: "received"`, `analysis: null`, and `review_decision: null`.
+
+## Run local static source checks
+
+An analyst or workspace admin can run bounded deterministic text-pattern checks against the source code already saved with a case:
+
+```bash
+curl "${AUTH[@]}" -X POST http://127.0.0.1:8000/api/reports/CASE_ID/static-analysis \
+  -H 'Content-Type: application/json' \
+  -d '{"language":"python"}'
+```
+
+Supported language selectors are `auto`, `python`, `javascript`, `typescript`, `java`, `go`, `php`, `ruby`, `csharp`, and `generic`. The request invokes only local Python text-pattern checks: it does not execute or import the submitted source, make a model call, fetch dependencies, or contact a target. Results are stored as separate, workspace-scoped runs and returned in `report.static_analysis_runs`; they do not overwrite model analysis or a human disposition. The patterns are intentionally limited and can produce false positives or miss issues. Every finding is marked unverified, and no findings do not establish that code is secure.
 
 ## Preview a saved Phantom result
 
@@ -184,6 +198,10 @@ Example excerpt:
 
 `verified` means only that the text matches the supplied source exactly. It does not establish semantic relevance, truth, reachability, or completeness; the reviewer must inspect the surrounding code and make the final decision. The optional stateless `POST /api/triage` accepts the same `challenge_pass` and separate confirmation fields for live requests; built-in demo cases make no model calls.
 
+### Phase 2B triage intelligence
+
+Saved-report analysis also includes `triage_intelligence`. This is a deterministic review aid layered after model normalization; it makes no model calls and never changes the human disposition. Its primary technical classification distinguishes `technically-contradicted`, `out-of-scope`, `informative`, `insufficient-evidence`, `potential-finding`, and `supported-finding`; an administrative `reject` alone is never treated as a false positive. Duplicate analysis is separate under `duplicate`, with status, candidate count, strongest candidate, similarity score, matching signals, and an explicit human-confirmation requirement. The output also contains evidence-aware `prioritization` with transparent factors, targeted `missing_evidence` requests, detected `contradictions`, workspace-scoped `duplicate_candidates`, and `explainability` with supporting excerpts, uncertainty, and limitations. Duplicate candidates expose separate report-text, technical-vocabulary, type, asset, root-cause, and code signals; a shared endpoint or generic shared code alone is insufficient. Similarity is only a duplicate-review signal: Mizan never automatically marks a report as duplicate or rejects it from similarity alone. Scanner observations remain unconfirmed and are capped in queue priority, while priority remains separate from severity ground truth.
+
 `POST /api/triage` remains available for stateless compatibility. Synthetic canned results can be requested with `{ "demo":"injection", "lang":"en" }`. A live call requires analyst/admin role, the user's own key (or owner-only fallback), and `confirm_egress: true`.
 
 ## Record a human disposition
@@ -214,6 +232,7 @@ Case deletion requires admin role in the relevant workspace (or the installation
 - `GET /api/models` — authenticated, key-free Meta model registry and current enablement status.
 - `GET /api/reports` — bounded workspace-scoped summaries with `status`, `q`, `limit`, and `offset` filters.
 - `GET /api/reports/{id}` and `/history` — workspace-scoped detail and events.
+- `POST /api/reports/{id}/static-analysis` — run local source-text heuristics on saved code (analyst/admin only; no network or code execution).
 - `GET /api/metrics` — counts scoped to the active workspace.
 - Missing/invalid credentials return 401; insufficient role returns 403; unknown/out-of-scope cases return 404.
 - If no owner token or provisioned users are available, API access fails closed with HTTP 503.

@@ -8,6 +8,18 @@ Bundled results are fixed synthetic examples, not a model benchmark. Do not repo
 
 The repository also includes six hand-labeled, synthetic English/Arabic regression cases in `tests/fixtures/evaluation_cases.json`. Their expected outcomes are narrow test labels for these scenarios, not universal security ground truth.
 
+## Keep evaluation tracks separate
+
+| Track | What runs | What the result means |
+|---|---|---|
+| Synthetic 100-case benchmark | `evaluation/benchmark/runner/run_benchmark.py` uses category-driven synthetic advisories; its injection check compares a regex with fixture labels | A deterministic guardrail-harness regression only. The baseline is a heuristic, not a raw LLM. Its scores are not model accuracy or per-family jailbreak coverage. |
+| Offline six-fixture check | `python scripts/evaluate.py` validates the bundled synthetic fixtures and makes zero model calls | Fixture/schema and language-coverage validation only; it does not invoke triage. |
+| Mocked provider contracts and automated tests | `unittest` and `pytest` exercise provider request/response/error behavior with mocked calls | Local application and contract regression only; no live Meta inference. |
+| Live Meta provider evaluation | Opt-in commands below, with a configured key and explicit egress consent | A dated run on the selected synthetic cases and model configuration; it is not independent human ground truth and may incur provider charges. |
+| Human reviewer evaluation | No controlled human benchmark result is recorded in this repository | Must be run and reported separately with an adjudication rubric; ordinary human review workflow is not a benchmark result. |
+
+The dated `docs/LIVE_TEST_REPORT.md` is a local HTTP/API integration run with no provider or external-target calls. “Live server” in that report does not mean live Meta evaluation.
+
 ## Safe evaluation set
 
 Use synthetic or explicitly authorized, sanitized reports only. Do not add unredacted bug-bounty reports, access tokens, personal data, private messages, or customer source code to this public repository. Keep expected labels separate from model output and record the rationale for each label.
@@ -53,7 +65,7 @@ The harness reports recommendation accuracy, false-accept rate on non-accept lab
 
 ## Running an evaluation
 
-1. Install Mizan locally or in an isolated private environment. Run `python3 -m pip install -r requirements.txt` and `python -m unittest discover -s tests -v`.
+1. Install Mizan locally or in an isolated private environment. Run `python3 -m pip install -r requirements-dev.txt`, then `python -m unittest discover -s tests -v`, `python -m pytest -q`, and `python scripts/evaluate.py`.
 2. Start Mizan and sign in with the privately generated installation-owner token.
 3. Create a dedicated evaluation workspace and an analyst account. Keep the issued personal token private.
 4. Ask the researcher to enter their own authorized Meta API key in the profile. The key is stored encrypted using `MIZAN_ENCRYPTION_KEY`; the researcher bears any provider usage charges.

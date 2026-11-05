@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import review_store
+import static_analysis
 
 
 VALID_ANALYSIS = {
@@ -53,9 +54,53 @@ class ReviewStoreTests(unittest.TestCase):
         self.assertIsNone(case["review_decision"])
         self.assertEqual([e["event_type"] for e in review_store.report_history(case["id"])], ["report_received"])
 
+    def test_duplicate_contexts_are_workspace_scoped(self):
+        with review_store._connect() as conn:
+            conn.execute(
+                "INSERT INTO workspaces(id, name, created_at, created_by) VALUES (?, ?, ?, ?)",
+                ("other", "Other workspace", "2026-01-01T00:00:00Z", "test"),
+            )
+        default_case = self.create()
+        other_case = review_store.create_report(
+            "IDOR claim in another workspace.", "return Message.objects.get(id=message_id)", "en", workspace_id="other",
+        )
+        default_contexts = review_store.list_report_contexts(workspace_id="default")
+        other_contexts = review_store.list_report_contexts(workspace_id="other")
+        self.assertEqual({item["id"] for item in default_contexts}, {default_case["id"]})
+        self.assertEqual({item["id"] for item in other_contexts}, {other_case["id"]})
+
     def test_database_file_permissions_are_owner_only(self):
         self.create()
         self.assertEqual(review_store.database_path().stat().st_mode & 0o777, 0o600)
+
+    def test_v2_database_migrates_to_static_analysis_runs(self):
+        with review_store._connect() as conn:
+            conn.execute("DROP TABLE static_analysis_runs")
+            conn.execute("PRAGMA user_version = 2")
+        review_store.init_db()
+        with review_store._connect() as conn:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            table = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='static_analysis_runs'").fetchone()
+        self.assertEqual(version, 3)
+        self.assertIsNotNone(table)
+
+    def test_static_analysis_run_is_separate_and_auditable(self):
+        case = self.create()
+        result = static_analysis.analyze_source(case["code"], "python")
+        updated = review_store.save_static_analysis(
+            case["id"], "python", result, actor="analyst", actor_user_id="user-1",
+        )
+        self.assertEqual(updated["status"], "received")
+        self.assertIsNone(updated["analysis"])
+        self.assertEqual(len(updated["static_analysis_runs"]), 1)
+        run = updated["static_analysis_runs"][0]
+        self.assertEqual(run["actor"], "analyst")
+        self.assertEqual(run["actor_user_id"], "user-1")
+        self.assertEqual(run["result"]["engine"], "mizan-local-heuristics-v1")
+        review_store.save_analysis(case["id"], VALID_ANALYSIS)
+        review_store.record_review(case["id"], "need-info", "reviewer")
+        with self.assertRaises(review_store.InvalidState):
+            review_store.save_static_analysis(case["id"], "python", result, actor="analyst")
 
     def test_report_and_code_length_limits_are_enforced(self):
         with self.assertRaises(ValueError):
