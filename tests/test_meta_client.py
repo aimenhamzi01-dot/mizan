@@ -89,13 +89,19 @@ class MetaClientTests(unittest.TestCase):
         self.assertEqual(payload["model"], "muse-spark-1.2")
         self.assertEqual(payload["reasoning_effort"], "high")
 
-    def test_max_reasoning_is_restricted_to_muse_spark_1_3(self):
+    def test_max_reasoning_is_supported_only_for_spark_1_3_and_wonder(self):
         with patch.dict(os.environ, {"META_REASONING_EFFORT": "max"}, clear=True):
             with self.assertRaises(meta_client.MetaAPIError) as caught:
                 meta_client.get_reasoning_effort("muse-spark-1.2")
         self.assertEqual(caught.exception.status, 400)
         with patch.dict(os.environ, {"META_REASONING_EFFORT": "max"}, clear=True):
             self.assertEqual(meta_client.get_reasoning_effort("muse-spark-1.3"), "max")
+            self.assertEqual(meta_client.get_reasoning_effort("muse-wonder-1.0"), "max")
+            with patch("meta_client._open_request", return_value=response_text("answer")) as opener:
+                meta_client.chat([], api_key="test-key", model_candidates=["muse-wonder-1.0"])
+        payload = json.loads(opener.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(payload["model"], "muse-wonder-1.0")
+        self.assertEqual(payload["reasoning_effort"], "max")
 
     def test_response_metadata_is_opt_in_and_usage_is_allowlisted(self):
         body = json.dumps({

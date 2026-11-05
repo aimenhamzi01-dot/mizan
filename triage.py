@@ -256,7 +256,9 @@ def _challenge_messages(report, code, analysis, language):
 def _run_challenge(report, code, language, analysis, api_key, primary_model="unknown"):
     messages = _challenge_messages(report, code, analysis, language)
     started = time.monotonic()
-    challenge_models = meta_client.get_challenge_models(primary_model)
+    challenge_models = model_hub.enabled_spark_candidates(
+        meta_client.get_challenge_models(primary_model)
+    )
     if not challenge_models:
         return {
             "status": "unavailable",
@@ -381,9 +383,10 @@ def triage(report, code=None, lang="en", *, api_key=None, challenge_pass=False, 
                 selected_model["hub_id"], model_hub.TASK_SECURITY_TRIAGE, messages, **chat_kwargs
             )
         else:
-            # Compatibility for existing clients keeps the configured Muse Spark
-            # fallback order. New UI requests use an explicit, single-model route.
-            response = meta_client.chat(messages, **chat_kwargs)
+            # Preserve the configured Spark fallback order, but do not let legacy
+            # requests or operator lists bypass the registry's data-use policy.
+            candidates = model_hub.legacy_spark_candidates()
+            response = meta_client.chat(messages, model_candidates=candidates, **chat_kwargs)
         reply = None
         try:
             reply, final_model, call_usage, final_reasoning_effort, final_output_format = _response_parts(response)

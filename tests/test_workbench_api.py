@@ -294,6 +294,38 @@ class WorkbenchAPITests(unittest.TestCase):
         self.assertIn(source, user_message)
         self.assertIn("read-only", user_message.lower())
 
+    def test_legacy_route_rejects_pending_model_before_provider_call(self):
+        with patch.dict(os.environ, {
+            "META_MODEL": "muse-spark-1.3-contributor", "MIZAN_ENABLED_MODELS": "",
+        }, clear=False), patch.object(meta_client, "chat") as chat:
+            status, _, body = self.request(
+                "/api/triage",
+                {"report": GOOD_REPORT, "code": GOOD_CODE, "confirm_egress": True},
+                method="POST",
+            )
+        self.assertEqual(status, 400)
+        self.assertIn(b"No enabled", body)
+        chat.assert_not_called()
+
+    def test_challenge_does_not_call_pending_model_version(self):
+        with patch.dict(os.environ, {
+            "META_MODEL": "muse-spark-1.3",
+            "META_CHALLENGE_MODELS": "muse-spark-1.3-contributor",
+            "MIZAN_ENABLED_MODELS": "",
+        }, clear=False), patch.object(meta_client, "chat", return_value=json.dumps(GOOD)) as chat:
+            status, _, body = self.request(
+                "/api/triage",
+                {
+                    "report": GOOD_REPORT, "code": GOOD_CODE,
+                    "confirm_egress": True, "challenge_pass": True,
+                    "confirm_challenge_egress": True,
+                },
+                method="POST",
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(chat.call_count, 1)
+        self.assertEqual(json.loads(body)["challenge_pass"]["status"], "unavailable")
+
     def test_challenge_pass_requires_separate_consent_and_downgrades_on_verified_concern(self):
         case = self.create_case(GOOD_REPORT, GOOD_CODE)
         primary = json.loads(json.dumps(GOOD))
@@ -624,7 +656,10 @@ class WorkbenchAPITests(unittest.TestCase):
             "scope": ["xss", "idor"],
             "authorized_scope": True,
         }
-        status, _, response = self.request("/api/phantom/tasks/manifest", body, method="POST")
+        with patch.dict(os.environ, {
+            "MIZAN_PHANTOM_SIGNING_KEY": "test-signing-key-that-is-at-least-32-chars",
+        }, clear=False):
+            status, _, response = self.request("/api/phantom/tasks/manifest", body, method="POST")
         self.assertEqual(status, 201)
         manifest = json.loads(response)["manifest"]
         self.assertEqual(manifest["format"], "mizan-phantom-task-v1")

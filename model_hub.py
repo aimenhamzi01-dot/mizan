@@ -186,6 +186,40 @@ def enabled_model_ids():
     return enabled
 
 
+def enabled_spark_candidates(candidates):
+    """Keep only explicitly enabled, implemented Muse Spark chat models."""
+    enabled = set(enabled_model_ids())
+    result, seen = [], set()
+    for model_id in candidates or []:
+        if not isinstance(model_id, str):
+            continue
+        model_id = model_id.strip()
+        item = _BY_ID.get(model_id)
+        if (
+            not model_id
+            or model_id not in enabled
+            or model_id in seen
+            or item is None
+            or item["family"] != "Muse Spark"
+            or item["integration"] != "implemented"
+            or item["adapter"] != "meta-chat-completions"
+            or TASK_SECURITY_TRIAGE not in item["tasks"]
+        ):
+            continue
+        result.append(model_id)
+        seen.add(model_id)
+    return result
+
+
+def legacy_spark_candidates():
+    """Preserve the legacy Spark fallback order without bypassing hub policy."""
+    configured = _csv("META_MODEL") or meta_client.DEFAULT_MODELS.split(",")
+    candidates = enabled_spark_candidates(configured)
+    if not candidates:
+        raise ModelHubError("No enabled, implemented Muse Spark model is configured for this request.")
+    return candidates
+
+
 def default_model_id():
     enabled = enabled_model_ids()
     if DEFAULT_MODEL_ID in enabled:

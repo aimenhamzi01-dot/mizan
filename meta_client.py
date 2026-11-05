@@ -112,8 +112,10 @@ def get_reasoning_effort(model=None):
         raise MetaAPIError(
             "META_REASONING_EFFORT must be minimal, low, medium, high, xhigh, or max.", 400
         )
-    if effort == "max" and model != "muse-spark-1.3":
-        raise MetaAPIError("The max reasoning effort is available only with muse-spark-1.3.", 400)
+    if effort == "max" and model not in {"muse-spark-1.3", "muse-wonder-1.0"}:
+        raise MetaAPIError(
+            "The max reasoning effort is available only with muse-spark-1.3 or muse-wonder-1.0.", 400
+        )
     return effort
 
 

@@ -37,12 +37,41 @@ class ModelHubTests(unittest.TestCase):
                 with self.assertRaises(model_hub.ModelHubError):
                     model_hub.resolve_model(model_id)
 
-    def test_enabled_model_is_routed_as_a_single_candidate(self):
-        with patch.object(model_hub.meta_client, "chat", return_value='{"ok":true}') as chat:
-            result, record = model_hub.route_chat("muse-spark-1.2", model_hub.TASK_SECURITY_TRIAGE, [])
-        self.assertEqual(result, '{"ok":true}')
-        self.assertEqual(record["model_id"], "muse-spark-1.2")
-        chat.assert_called_once_with([], model_candidates=["muse-spark-1.2"])
+    def test_supported_models_are_routed_as_their_single_exact_provider_id(self):
+        with patch.dict(os.environ, {
+            "META_MODEL": "muse-spark-1.3,muse-spark-1.2,muse-spark-1.1",
+            "MIZAN_ENABLED_MODELS": "muse-wonder-1.0",
+        }, clear=False):
+            for model_id in ("muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.1", "muse-wonder-1.0"):
+                with self.subTest(model_id=model_id), patch.object(
+                    model_hub.meta_client, "chat", return_value='{"ok":true}'
+                ) as chat:
+                    result, record = model_hub.route_chat(model_id, model_hub.TASK_SECURITY_TRIAGE, [])
+                    self.assertEqual(result, '{"ok":true}')
+                    self.assertEqual(record["model_id"], model_id)
+                    chat.assert_called_once_with([], model_candidates=[model_id])
+
+    def test_spark_fallback_filter_excludes_pending_and_experimental_models(self):
+        env = {
+            "META_MODEL": "muse-spark-1.3,muse-spark-1.2,muse-spark-1.3-contributor",
+            "MIZAN_ENABLED_MODELS": "muse-wonder-1.0",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            self.assertEqual(
+                model_hub.enabled_spark_candidates([
+                    "muse-spark-1.3-contributor", "muse-wonder-1.0", "muse-spark-1.2",
+                    "muse-spark-1.2", "unknown-model",
+                ]),
+                ["muse-spark-1.2"],
+            )
+            self.assertEqual(model_hub.legacy_spark_candidates(), ["muse-spark-1.3", "muse-spark-1.2"])
+
+    def test_pending_only_legacy_configuration_fails_closed(self):
+        with patch.dict(os.environ, {
+            "META_MODEL": "muse-spark-1.3-contributor", "MIZAN_ENABLED_MODELS": "",
+        }, clear=False):
+            with self.assertRaises(model_hub.ModelHubError):
+                model_hub.legacy_spark_candidates()
 
     def test_registry_has_no_provider_prices_or_private_credentials(self):
         payload = model_hub.public_registry(has_meta_key=True)
