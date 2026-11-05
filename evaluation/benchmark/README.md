@@ -1,29 +1,24 @@
-# Mizan 100-Case Security Benchmark Suite
+# Synthetic security-triage regression dataset
 
-## Overview
-This benchmark suite provides an objective, reproducible evaluation dataset to measure whether Mizan can:
-1. Accurately validate genuine technical security findings backed by code evidence.
-2. Filter out automated scanner false positives and misclassifications.
-3. Detect missing or fabricated evidence excerpts.
-4. Resiliently defend against adversarial prompt injection attempts across 12 attack vectors (in English and Arabic).
-5. Escalate ambiguous, incomplete, or mixed-quality reports to human-in-the-loop triage (`need-info`).
-6. Reject reports directly disproved by supplied source code context.
+This directory contains a deterministic, synthetic fixture set for exercising selected Mizan triage guardrails. It is a regression harness, **not** a live-model benchmark or a source of production accuracy claims.
 
-## Dataset Structure
-Total Cases: Exactly 100 cases in `evaluation/benchmark/datasets/benchmark_100.json`.
-- **Valid Security Findings (`valid_finding`)**: 20 cases (MIZAN-001 – MIZAN-020)
-- **False Positive Reports (`false_positive`)**: 15 cases (MIZAN-021 – MIZAN-035)
-- **Unsupported/Fabricated Evidence (`unsupported_evidence`)**: 15 cases (MIZAN-036 – MIZAN-050)
-- **Prompt Injection Attacks (`prompt_injection`)**: 20 cases (MIZAN-051 – MIZAN-070)
-- **Ambiguous/Incomplete Reports (`ambiguous_incomplete`)**: 10 cases (MIZAN-071 – MIZAN-080)
-- **Contradictory Evidence (`contradictory_evidence`)**: 10 cases (MIZAN-081 – MIZAN-090)
-- **Mixed-Quality Reports (`mixed_quality`)**: 10 cases (MIZAN-091 – MIZAN-100)
+## Dataset
 
-## Validation Schema
-Defined in `evaluation/benchmark/schemas/case.schema.json`.
+`datasets/benchmark_100.json` contains 100 synthetic cases across seven fixture categories. The dataset SHA-256 recorded by the checked-in result artifact is `8764641f0b03b7edd769b1e35c1c68bbe24b2b1f9a8c7de0a8834dd3006d2689`. Validate the format with `schemas/case.schema.json`. `datasets/generate_cases.py` generates the fixture records.
 
-## Ethical Safeguards
-- All 100 test cases are synthetic.
-- No real credentials, private tokens, or real user identifiers are used.
-- All adversarial prompt injection payloads are inert test fixtures that are never executed as system commands.
-- Offline evaluation mode requires zero external network connections or API keys.
+## Offline runner semantics
+
+Run `python evaluation/benchmark/runner/run_benchmark.py` for the deterministic offline path. It makes no provider request. The runner synthesizes a model-advisory object from each fixture’s category, passes it through Mizan normalization, and compares the result with the fixture label. Its comparison “baseline” is a keyword/regex heuristic rather than a raw LLM. The reported scores therefore describe this constructed harness path only, not actual model decisions or empirical security accuracy.
+
+`runner/adversarial_eval.py` checks the prompt-defense regex against the cases’ injection labels and returns aggregate counts. It does not assess attack-family coverage or semantic jailbreak resistance. The checked-in files under `reports/` are historical outputs, not evidence of a live model run. The main result records commit `79b75f42c05ed5152941162b363970f7b6c47874` and the dataset SHA-256 above.
+
+The benchmark runner writes output files. `--output` changes the main report path, but the adversarial report is always written to `evaluation/benchmark/reports/prompt_injection_results.json`; rerunning the script can overwrite that tracked file.
+
+## Other evaluation tracks
+
+- `python scripts/evaluate.py` validates a separate six-case synthetic bilingual fixture set and makes zero model calls; it does not run triage.
+- `python -m unittest discover -s tests -v` and `python -m pytest -q` run local automated tests. Provider calls in these tests are mocked.
+- A live Meta evaluation requires an authorized key and explicit `--live --confirm-egress`. It sends selected synthetic report/code text to the configured provider and may incur charges. No live result is included here.
+- No controlled human-review benchmark result is recorded. Human assessment of semantic evidence relevance, severity, and ground truth must be reported separately.
+
+See `docs/MIZAN_BENCHMARK.md`, `docs/EVALUATION.md`, and `docs/BENCHMARK_FINAL_REPORT.md` for the distinctions and limitations.

@@ -1,5 +1,7 @@
 import copy
 import json
+import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -50,6 +52,52 @@ class Phase2B(unittest.TestCase):
         self.assertGreaterEqual(candidates[0]["similarity"], candidates[1]["similarity"])
         self.assertTrue(all(item["human_confirmation_required"] for item in candidates))
         self.assertEqual(self.enrich(existing=existing)["decision"], "accept")
+
+    def test_equal_similarity_candidates_use_report_id_as_tie_breaker(self):
+        existing = [
+            {"id": "z-report", "report": REPORT, "code": CODE},
+            {"id": "a-report", "report": REPORT, "code": CODE},
+            {"id": "m-report", "report": REPORT, "code": CODE},
+        ]
+        candidates = triage_intelligence.duplicate_candidates(REPORT, CODE, existing)
+        self.assertEqual([item["report_id"] for item in candidates], ["a-report", "m-report", "z-report"])
+
+    def test_duplicate_outputs_are_identical_across_python_hash_seeds(self):
+        payload = {
+            "report": REPORT + " SQL injection and access control failure on /api/items/42 and https://example.test/v1",
+            "code": CODE + "\n# subprocess.shell=True should not change token ordering",
+            "analysis": copy.deepcopy(BASE),
+            "existing": [
+                {"id": "z-report", "report": REPORT, "code": CODE},
+                {"id": "a-report", "report": REPORT, "code": CODE},
+                {"id": "same-id", "report": "SQL injection and unsafe query on /api/items/42", "code": "execute raw SQL"},
+            ],
+        }
+        program = r'''
+import copy, json, sys
+import triage_intelligence as ti
+data = json.load(sys.stdin)
+left = ti.extract_signals(data["report"], data["code"])
+right = ti.extract_signals(data["existing"][2]["report"], data["existing"][2]["code"])
+score, reasons, details = ti._similarity(left, right)
+result = {
+    "signals": left,
+    "similarity": {"score": score, "reasons": reasons, **details},
+    "candidates": ti.duplicate_candidates(data["report"], data["code"], data["existing"]),
+    "enriched": ti.enrich(copy.deepcopy(data["analysis"]), data["report"], data["code"], data["existing"]),
+}
+print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+'''
+        outputs = []
+        for seed in ("1", "42", "100", "999"):
+            env = os.environ.copy()
+            env["PYTHONHASHSEED"] = seed
+            run = subprocess.run(
+                [sys.executable, "-c", program], input=json.dumps(payload, ensure_ascii=False),
+                text=True, capture_output=True, check=True, cwd=Path(__file__).resolve().parents[1], env=env,
+            )
+            outputs.append(run.stdout.strip())
+        self.assertEqual(len(set(outputs)), 1, "duplicate analysis changed across independent hash-seeded processes")
 
     def test_weak_duplicate_candidate_does_not_downgrade_supported_finding(self):
         existing = [{"id": "weak", "report": "IDOR on /api/invoices/1058 exposes another user's invoice", "code": CODE}]

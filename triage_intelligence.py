@@ -7,6 +7,7 @@ evidence requests, contradictions, and an explanation with limitations.
 """
 from __future__ import annotations
 
+import json
 import re
 from difflib import SequenceMatcher
 
@@ -47,25 +48,27 @@ def _text(*values) -> str:
     return " ".join(value for value in values if isinstance(value, str)).lower()
 
 
-def _tokens(text: str) -> set[str]:
-    return {item for item in _WORD_RE.findall(text.lower()) if item not in _STOPWORDS and len(item) > 2}
+def _tokens(text: str) -> list[str]:
+    """Return unique terms in a stable order for normalization and similarity."""
+    return sorted({item for item in _WORD_RE.findall(text.lower()) if item not in _STOPWORDS and len(item) > 2})
 
 
-def _jaccard(left: set[str], right: set[str]) -> float:
-    union = left | right
-    return len(left & right) / len(union) if union else 0.0
+def _jaccard(left, right) -> float:
+    left_set, right_set = set(left), set(right)
+    union = left_set | right_set
+    return len(left_set & right_set) / len(union) if union else 0.0
 
 
-def _matches(text: str, patterns: tuple[str, ...]) -> set[str]:
-    return {pattern for pattern in patterns if pattern.lower() in text}
+def _matches(text: str, patterns: tuple[str, ...]) -> list[str]:
+    return sorted(pattern for pattern in patterns if pattern.lower() in text)
 
 
 def extract_signals(report: str, code: str = "") -> dict:
     """Extract conservative lexical signals; these are hints, not proof."""
     text = _text(report, code)
-    types = {name for name, patterns in _TYPE_PATTERNS.items() if _matches(text, patterns)}
-    roots = {name for name, patterns in _ROOT_CAUSE_PATTERNS.items() if _matches(text, patterns)}
-    assets = set(_URL_RE.findall(report or ""))
+    types = sorted(name for name, patterns in _TYPE_PATTERNS.items() if _matches(text, patterns))
+    roots = sorted(name for name, patterns in _ROOT_CAUSE_PATTERNS.items() if _matches(text, patterns))
+    assets = sorted(set(_URL_RE.findall(report or "")))
     report_text = _text(report)
     code_text = _text(code)
     return {
@@ -74,8 +77,8 @@ def extract_signals(report: str, code: str = "") -> dict:
         "code_tokens": _tokens(code_text),
         "report_normalized": " ".join(_tokens(report_text)),
         "code_normalized": " ".join(_tokens(code_text)),
-        "vulnerability_types": sorted(types),
-        "root_causes": sorted(roots),
+        "vulnerability_types": types,
+        "root_causes": roots,
         "assets": sorted(assets)[:20],
     }
 
@@ -85,9 +88,9 @@ def _similarity(current: dict, other: dict) -> tuple[float, list[str], dict]:
     report_text_score = SequenceMatcher(None, current["report_normalized"], other["report_normalized"]).ratio()
     vocabulary_score = _jaccard(current["report_tokens"], other["report_tokens"])
     code_score = SequenceMatcher(None, current["code_normalized"], other["code_normalized"]).ratio() if current["code_normalized"] and other["code_normalized"] else 0.0
-    type_overlap = set(current["vulnerability_types"]) & set(other["vulnerability_types"])
-    root_overlap = set(current["root_causes"]) & set(other["root_causes"])
-    asset_overlap = set(current["assets"]) & set(other["assets"])
+    type_overlap = sorted(set(current["vulnerability_types"]) & set(other["vulnerability_types"]))
+    root_overlap = sorted(set(current["root_causes"]) & set(other["root_causes"]))
+    asset_overlap = sorted(set(current["assets"]) & set(other["assets"]))
     signals = {
         "report_text": round(report_text_score, 4),
         "technical_vocabulary": round(vocabulary_score, 4),
@@ -101,11 +104,11 @@ def _similarity(current: dict, other: dict) -> tuple[float, list[str], dict]:
     if vocabulary_score >= 0.35:
         reasons.append("technical vocabulary similarity: %.2f" % vocabulary_score)
     if type_overlap:
-        reasons.append("shared vulnerability type: " + ", ".join(sorted(type_overlap)))
+        reasons.append("shared vulnerability type: " + ", ".join(type_overlap))
     if root_overlap:
-        reasons.append("shared root-cause signal: " + ", ".join(sorted(root_overlap)))
+        reasons.append("shared root-cause signal: " + ", ".join(root_overlap))
     if asset_overlap:
-        reasons.append("shared affected asset: " + ", ".join(sorted(asset_overlap)[:3]))
+        reasons.append("shared affected asset: " + ", ".join(asset_overlap[:3]))
     if code_score >= 0.60:
         reasons.append("relevant code similarity: %.2f" % code_score)
     score = (
@@ -145,7 +148,10 @@ def duplicate_candidates(report: str, code: str, existing_reports: list[dict] | 
                 "signals": details["signals"],
                 "human_confirmation_required": True,
             })
-    candidates.sort(key=lambda item: (-item["similarity"], item["report_id"]))
+    candidates.sort(key=lambda item: (
+        -item["similarity"], item["report_id"],
+        json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+    ))
     return candidates[:limit]
 
 

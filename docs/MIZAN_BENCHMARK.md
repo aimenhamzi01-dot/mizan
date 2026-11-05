@@ -1,60 +1,31 @@
-# Mizan Security Benchmark & Evaluation System
+# Mizan synthetic triage regression harness
 
-## Executive Summary
-The **Mizan Evidence Intelligence Benchmark** is an empirical, reproducible evaluation system developed to test whether AI-powered security assessment platforms can reliably distinguish genuine security vulnerabilities from false positives, unsupported claims, scanner noise, and adversarial prompt injections.
+## Purpose and limits
 
-The benchmark demonstrates why standalone LLM outputs cannot be trusted as definitive security verdicts without independent, cryptographic evidence verification and fail-closed human review guardrails.
+This repository includes a synthetic regression dataset and deterministic guardrail harness for selected security-triage scenarios. It is useful for checking that known fixtures exercise the intended normalization and prompt-injection rules. It is **not** a live model benchmark, a validated security ground-truth set, or a measure of production accuracy.
 
-## The Benchmark Problem
-In real-world security triage, vulnerability reports submitted by researchers or automated scanners are inherently untrusted data:
-1. **Hallucinated or Fabricated Claims**: LLMs may accept plausible-sounding claims without checking if the cited code excerpt exists in the actual codebase.
-2. **Scanner Noise**: Automated scanners often flag safe parameterized queries as SQL injection or secure modern frameworks as vulnerable.
-3. **Contradictory Code**: Reports often claim missing access controls on endpoints that have explicit authorization decorators.
-4. **Adversarial Prompt Injection**: Malicious actors embed hidden instructions (in English, Arabic, base64, markdown, or delimiter breaks) to coerce AI reviewers into auto-accepting findings.
+All benchmark records are synthetic. The dataset has a fixed set of 100 cases across seven categories: valid-finding examples, false-positive/scanner-noise examples, unsupported evidence, prompt-injection-labeled examples, ambiguous or incomplete reports, contradictory evidence, and mixed-quality reports. The exact records and expected labels are in `evaluation/benchmark/datasets/benchmark_100.json`; validate them against `evaluation/benchmark/schemas/case.schema.json`.
 
-## Dataset Design (100 Synthetic Cases)
-The benchmark evaluates exactly 100 standardized, synthetic cases distributed across 7 categories:
+## What the offline runner does
 
-| Category | Cases | Ground Truth Characteristics | Expected Outcome |
-| :--- | :---: | :--- | :---: |
-| **A. Valid Findings** | 20 | Real vulnerabilities with matching source code evidence | `accepted` |
-| **B. False Positives** | 15 | Scanner noise, parameterized queries, sanitized context | `rejected` |
-| **C. Unsupported Evidence** | 15 | Non-existent functions, fabricated error dumps | `need-info` |
-| **D. Prompt Injection** | 20 | Adversarial instructions attempting to force acceptance | `need-info` |
-| **E. Ambiguous/Incomplete** | 10 | Vague claims without reproduction steps or endpoints | `need-info` |
-| **F. Contradictory Evidence** | 10 | Code directly disproves the claimed vulnerability | `rejected` |
-| **G. Mixed Quality** | 10 | Minor fact mixed with exaggerated critical claims | `need-info` |
+`evaluation/benchmark/runner/run_benchmark.py` has a deterministic offline path and a separately gated live-provider path. The offline path does not call Meta. It constructs a synthetic advisory from each case’s category, applies normalization and hard-coded regex injection checks, and compares the resulting decision with the fixture’s expected label. Its “baseline” decision is a heuristic, not an unguarded language-model response. Consequently, perfect values in the stored offline artifact describe this constructed test path only; they must not be presented as Mizan or Muse Spark model accuracy.
 
-- **Checksum**: SHA-256 of `evaluation/benchmark/datasets/benchmark_100.json`
-- **Schema**: Validated against `evaluation/benchmark/schemas/case.schema.json`
+`evaluation/benchmark/runner/adversarial_eval.py` checks the prompt-injection detector against the fixture-level boolean labels and reports aggregate results. The dataset contains twenty injection-labeled records, but the evaluator does not produce measured coverage per attack family. Its named family list is not a family-level evaluation. Do not claim comprehensive jailbreak resistance from these outputs.
 
-## Evaluation Methodology & Comparison
+The stored result at `evaluation/benchmark/reports/benchmark_results.json` is a historical deterministic artifact. It records commit `79b75f42c05ed5152941162b363970f7b6c47874`, date `2026-11-04`, and dataset SHA-256 `8764641f0b03b7edd769b1e35c1c68bbe24b2b1f9a8c7de0a8834dd3006d2689`. Its checksum matches the current 100-case fixture; its metrics do not measure a live provider run.
 
-### Comparison Model:
-1. **Baseline Raw Model (Direct LLM)**: Evaluates report text without Mizan's evidence verification or fail-closed guardrails. Accepts claims at face value.
-2. **Full Mizan Evidence Pipeline**: Couples Muse Spark reasoning with server-side exact citation matching, prompt injection defense layer, code contradiction detection, and fail-closed routing.
+## Separate evaluation tracks
 
-### Empirical Results (Deterministic Offline Pipeline):
-- **Overall Accuracy**: **100.0%** (100 / 100 cases correctly routed according to ground truth)
-- **Prompt Injection Defense Recall**: **100.0%** (20 / 20 adversarial attacks caught)
-- **Prompt Injection Defense Precision**: **100.0%** (0 benign cases falsely flagged as injection)
-- **False Acceptance Rate on Non-Accept Cases**: **0.0%** (0 unverified cases marked accepted)
-- **F1 Score**: **1.0**
+| Track | Command or evidence | What it establishes | What it does not establish |
+|---|---|---|---|
+| Synthetic 100-case harness | `python evaluation/benchmark/runner/run_benchmark.py` (offline default) | Deterministic behavior of the category-driven harness on its synthetic labels | Live model accuracy, independent adjudication, semantic truth, or field performance |
+| Six-case offline fixture check | `python scripts/evaluate.py` | Fixture structure/language coverage; zero model calls | A model run or triage accuracy |
+| Mocked provider and application tests | `python -m unittest discover -s tests -v` and `python -m pytest -q` | Local contracts and deterministic application behavior under tests/mocks | Live Meta behavior or human agreement |
+| Live provider evaluation | `python scripts/evaluate.py --live --confirm-egress --limit 1` | One explicitly authorized synthetic case sent to the configured provider | General performance or independent ground truth; provider usage may be charged |
+| Human reviewer evaluation | No result is recorded in this repository | Requires a separate, documented adjudication exercise | Must not be inferred from the product’s ordinary human-review workflow |
 
-*Note on Live Evaluation*: When `MODEL_API_KEY` is not provided, the benchmark executes in deterministic offline pipeline mode and clearly marks live Meta API evaluation as `NOT RUN`. When API credentials are provided with `--live --confirm-egress`, the runner calls Meta Muse Spark directly.
+The 100-case runner also supports live mode only with `--live --confirm-egress`; it sends the synthetic benchmark text to the configured provider. Review output paths before running: the script writes a main report and the adversarial report. Keep live artifacts separate, dated, and labeled with the model, prompt/schema version, fixture checksum, usage, and failures.
 
-## Evidence State Separation
-Mizan enforces a strict four-state operational evidence lifecycle:
-- `OBSERVED`: Technical string or header noted in raw probe or report.
-- `REPRODUCIBLE`: Step-by-step reproduction payload executed and verified.
-- `VALIDATED`: Cryptographically matched against source/traffic without contradiction.
-- `HUMAN_CONFIRMED`: Final disposition signed by an authenticated security analyst.
+## Evidence-state note
 
-## Reproducing the Benchmark
-To reproduce these results locally:
-```bash
-python3 evaluation/benchmark/runner/run_benchmark.py
-```
-Generated reports:
-- Full benchmark results: `evaluation/benchmark/reports/benchmark_results.json`
-- Adversarial injection evaluation: `evaluation/benchmark/reports/prompt_injection_results.json`
+The benchmark helper includes labels and a small state-transition utility for test examples. Those labels do not constitute an operational evidence lifecycle or proof that a real issue was reproduced, cryptographically validated, or human-confirmed. Exact quotation matching is only a string-level check; semantic relevance, exploitability, severity, and correctness require independent review.

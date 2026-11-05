@@ -1,82 +1,49 @@
-# Mizan Benchmark Final Implementation & Verification Report
+# Benchmark and evaluation status — corrected
 
-## A. Files Created
-1. `docs/EVALUATION_BASELINE.md`: Comprehensive audit of initial capabilities, weaknesses, architecture, and baseline tests.
-2. `docs/MIZAN_BENCHMARK.md`: Public-facing benchmark documentation explaining problem, dataset design, methodology, metrics, and limitations.
-3. `docs/JUDGE_DEMO.md`: Reproducible 3-minute hackathon judge walkthrough script.
-4. `evaluation/benchmark/schemas/case.schema.json`: Strict JSON schema governing the 100 benchmark test cases.
-5. `evaluation/benchmark/datasets/benchmark_100.json`: 100 synthetic security report cases across 7 distinct categories.
-6. `evaluation/benchmark/datasets/generate_cases.py`: Deterministic dataset generator.
-7. `evaluation/benchmark/runner/adversarial_eval.py`: Dedicated adversarial prompt injection evaluator across 12 attack families.
-8. `evaluation/benchmark/runner/run_benchmark.py`: Benchmark evaluation runner comparing raw unverified baseline vs Mizan pipeline.
-9. `evaluation/benchmark/reports/benchmark_results.json`: Comprehensive benchmark results with confusion matrix, accuracy, precision, recall, and reproducibility metadata.
-10. `evaluation/benchmark/reports/prompt_injection_results.json`: Detailed results of adversarial injection testing across all 100 cases.
-11. `evaluation/benchmark/README.md`: Architecture guide and usage instructions for the benchmark suite.
-12. `security_scope.py`: Target scope management and anti-SSRF protection.
-13. `recon_engine.py`: Passive DNS & TLS reconnaissance engine.
-14. `scanner_engine.py`: Modular non-destructive security scanner with anti-DNS-rebinding connection logic.
-15. `prompt_defense.py`: Dual-layer prompt injection defense in English and Arabic.
-16. `evidence_engine.py`: Cryptographic SHA-256 evidence intelligence engine.
-17. `risk_engine.py`: Multi-dimensional CVSS-compatible risk assessment engine.
-18. `review_workflow.py`: Human-in-the-loop review workflow lifecycle engine.
-19. `audit_trail.py`: Tamper-evident hash-linked SHA-256 audit trail.
-20. `benchmark_engine.py`: Empirical evaluation runner for platform health checks.
-21. `report_generator.py`: Structured JSON and printable HTML report generator.
-22. `security_store.py`: SQLite persistence layer for all security assessment entities.
-23. `tests/test_unified_platform.py`: Unit tests for scope, SSRF, evidence, risk, and injection defense.
-24. `tests/test_unified_api.py`: End-to-end integration tests for all security platform REST APIs.
+**Reviewed:** 2026-11-05
+**Repository base revision:** `85caff2054ae3cc48bd4573e7badd8e63227c471` (`main` before this Phase 2C change set)
+**Scope:** Documentation audit, duplicate-analysis determinism, and test-runner/CI updates. No Meta provider call or human benchmark review was performed for this change set.
 
-## B. Files Modified
-1. `server.py`: Integrated security store, scope validation, recon, scanning, finding review, audit verification, and report endpoints.
-2. `static/index.html`: Upgraded web dashboard with interactive operational tabs (Workbench, Targets & Scope, Assessments, Findings & Risk, Evidence Center, Evaluation Center, Tamper-Evident Audit).
+This report supersedes the earlier implementation narrative in this file. It separates evidence from different evaluation tracks and makes no production model-accuracy claim. Test counts are deliberately not copied here; the current runner and CI output report them for each revision.
 
-## C. Bugs Discovered
-1. **SSRF & DNS Rebinding Risk in Scanner Client**: Initial client resolved hostname for validation, but then connected to hostname directly, leaving a potential DNS rebinding window.
-2. **TLS Certificate Hostname Check on Direct IP**: Connecting to an IP address with default HTTPS verification causes Python's `HTTPSConnection` to check the IP against the certificate SAN rather than the intended domain name.
-3. **Incomplete Prompt Injection Heuristics**: Missing signatures for authority impersonation, system prompt extraction, base64 instruction hints, simulated completion blocks, and Arabic authority hijacking.
-4. **Vocabulary Mismatch in Evaluation Runner**: Evaluation runner expected `"accepted"` while triage returned `"accept"`.
+## 1. Synthetic 100-case regression harness
 
-## D. Bugs Fixed
-1. In `scanner_engine.py`, pinned HTTPS connection directly to validated IP while preserving SNI and domain certificate checking via `_server_hostname = host`.
-2. Expanded `prompt_defense.py` with compiled regex patterns for all 12 attack families in both English and Arabic.
-3. Normalized decision vocabulary in `run_benchmark.py` (`accept`/`accepted`, `reject`/`rejected`).
-4. Replaced synthetic category short-circuiting in `run_benchmark.py` with actual calls to `triage.normalize` and exact quote matching.
+The repository contains a fixed, synthetic 100-case dataset in `evaluation/benchmark/datasets/benchmark_100.json`, spanning seven categories. Its SHA-256 is `8764641f0b03b7edd769b1e35c1c68bbe24b2b1f9a8c7de0a8834dd3006d2689`.
 
-## E. Existing Tests Before and After
-- **Before**: 128 tests passed.
-- **After**: 143 tests passed (100% pass rate).
+The checked-in result artifact records `deterministic_offline_pipeline`, commit `79b75f42c05ed5152941162b363970f7b6c47874`, and timestamp `2026-11-04T10:40:15.263215Z`. Its dataset checksum matches the current fixture. A fresh in-process execution of the offline benchmark and its injection evaluator on 2026-11-05 reproduced the stored summary for that dataset; no provider was contacted and the tracked result files were not rewritten.
 
-## F. New Tests and Results
-- `tests/test_unified_platform.py`: 13 tests covering SSRF IP blocking, TargetScope validation, prompt injection detection, evidence integrity and tampering, risk calculation, analyst override, audit chain verification, and report generation. **All Passed.**
-- `tests/test_unified_api.py`: 2 end-to-end integration tests covering target registration, assessment creation, reconnaissance, scanning, finding adjudication, evidence retrieval, audit verification, and defense APIs. **All Passed.**
+**Interpretation is intentionally narrow.** In `run_benchmark.py`, the purported “baseline” is a hand-coded heuristic, not a direct LLM result. The offline path constructs a synthetic model advisory from each case’s category, passes that object through normalization, and overrides its decision to `need-info` when the prompt-injection regex fires. The resulting decision is compared with the fixture’s expected outcome. Therefore, the reported perfect decision metrics are deterministic harness behavior on category-labeled synthetic cases—not empirical model accuracy, independent evidence validation, or a measurement of real-world vulnerability triage. The injection evaluator compares the regex detector with the fixtures’ injection labels and reports aggregate counts; it does not measure coverage by attack family or semantic resistance.
 
-## G. Benchmark Results
-From `evaluation/benchmark/reports/benchmark_results.json`:
-- **Total Cases**: 100 cases.
-- **Pipeline Execution Accuracy**: 100.0%
-- **Precision (Accepted Findings)**: 100.0%
-- **Recall (Accepted Findings)**: 100.0%
-- **Prompt Injection Defense Recall**: 100.0% (20/20 attacks caught)
-- **Prompt Injection Defense Precision**: 100.0% (0 false alarms on benign text)
-- **False Acceptance Rate on Non-Accept Cases**: 0.0%
-- **Confusion Matrix**:
-  - Accepted (Ground Truth: 20) -> Mizan: 20 Accepted, 0 Rejected, 0 Need-Info
-  - Rejected (Ground Truth: 25) -> Mizan: 0 Accepted, 25 Rejected, 0 Need-Info
-  - Need-Info (Ground Truth: 55) -> Mizan: 0 Accepted, 0 Rejected, 55 Need-Info
+To inspect the harness implementation and stored historical artifact, see `evaluation/benchmark/runner/run_benchmark.py` and `evaluation/benchmark/reports/benchmark_results.json`. Running the benchmark script writes result files; review its output paths before rerunning it in a working tree.
 
-## H. Live API Evaluation Status
-- Deterministic offline evaluation mode is fully functional and validated on all 100 cases without external dependencies.
-- Live Meta Muse Spark evaluation path is fully implemented in `run_benchmark.py` via `run_live_model_evaluation`. When `MODEL_API_KEY` is not set, it explicitly reports `NOT RUN (API key not configured)`.
+## 2. Offline fixture validation
 
-## I. Remaining Limitations
-1. While deterministic regex heuristics catch all 12 defined injection attack families, zero-day adversarial jailbreaks in natural language may still require model-assisted semantic classification.
-2. The printable HTML report uses browser print CSS for PDF generation; native headless PDF generation via Weasyprint or Chromium is optional and not included in default lightweight containers.
+`python scripts/evaluate.py` is a separate, small-fixture check. It validates the six hand-authored synthetic English/Arabic fixture records and reports `mode: offline-fixture-validation` with `model_calls: 0`. It does **not** call `triage`, score live model output, or establish accuracy. The unit test `tests/test_evaluation_harness.py` also checks that the default CLI path does not invoke the model.
 
-## J. Security Concerns
-- All user-supplied reports and codes are strictly sanitized and never executed.
-- External target scanning is protected by strict scope and multi-layer SSRF defenses.
-- All credentials and API keys in audit logs are redacted before hashing.
+## 3. Mocked provider contracts and local automated tests
 
-## K. Recommended Next Actions
-1. Deploy with live `MODEL_API_KEY` and run `python3 evaluation/benchmark/runner/run_benchmark.py --live --confirm-egress` to benchmark real Meta Muse Spark responses against the 100-case dataset.
-2. Integrate continuous benchmark runs into GitHub Actions CI.
+The standard-library `unittest` suite and the `pytest` suite exercise deterministic application behavior, persistence, authentication/authorization, evidence normalization, duplicate review aids, and provider request/response/error contracts. Provider boundaries are mocked; these tests make no live Meta inference request. Local HTTP integration tests use synthetic inputs and temporary storage, and are not provider evaluations.
+
+The new determinism regression starts separate Python processes under several `PYTHONHASHSEED` values and compares extracted signals, similarity details, candidate order, and enriched triage output. This specifically guards against hash-order changes affecting normalization or duplicate ranking.
+
+Current validation commands are:
+
+```bash
+python -m unittest discover -s tests -v
+python -m pytest -q
+python scripts/evaluate.py
+```
+
+CI installs test-only dependencies from `requirements-dev.txt`, runs both test runners, and runs the offline fixture check. The application’s runtime dependency list remains separate.
+
+## 4. Live Meta provider evaluation
+
+No live Meta evaluation was run for this report. The code has opt-in live evaluation paths, but the presence of a runner or an offline JSON artifact is not evidence that a live provider run occurred. A live run requires a configured personal provider key and the explicit `--live --confirm-egress` flags. It sends the selected synthetic report/code text to the configured provider and may incur charges. Record the model identifier, prompt/schema version, fixture checksum, date, usage, failures, and output artifact for any future run; report it separately from mocked tests and synthetic harness metrics.
+
+## 5. Human reviewer evaluation
+
+No controlled human-reviewed benchmark result is recorded here. A human disposition in ordinary product workflow is not, by itself, a benchmark. Any future human evaluation should use authorized, sanitized cases, an explicit adjudication rubric, independent review of semantic evidence relevance and outcome, and a separate record of disagreements and overrides. Do not use model labels as ground truth.
+
+## 6. Related local service report
+
+`docs/LIVE_TEST_REPORT.md` records a dated local HTTP/API integration run. It explicitly reports zero provider calls and zero external-target calls, so it must not be described as a live Meta evaluation. Its run-specific totals are historical evidence for that dated run, not a current, revision-independent test count.

@@ -4,10 +4,10 @@ Thanks for helping improve Mizan. Keep changes focused, tested offline, and cons
 
 ## Development setup
 
-- Use Python 3.9 or newer and install `requirements.txt` (`cryptography` is used for AES-GCM key storage).
+- Use Python 3.9 or newer and install `requirements-dev.txt` for development (`cryptography` is the runtime dependency; `pytest` is test-only).
 - Docker Engine and Docker Compose v2 are optional for local container validation.
 - Keep `.env`, SQLite databases, report text, source snippets, API keys, user tokens, and user-provided vulnerability reports out of commits.
-- Run `python -m unittest discover -s tests -v` before opening a change.
+- Run `python -m unittest discover -s tests -v`, `python -m pytest -q`, and `python scripts/evaluate.py` before opening a change. The fixture command is an offline structure check; it does not call Meta or measure model accuracy.
 - If Docker is available, validate `docker compose config` with test-only values, build the image, and smoke-test `/healthz` and authenticated `/api/health`.
 
 ## Required safety invariants

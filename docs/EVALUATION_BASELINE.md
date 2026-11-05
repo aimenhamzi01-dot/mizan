@@ -1,11 +1,12 @@
-# Mizan Evaluation Baseline Report
+# Mizan Historical Evaluation Baseline Snapshot
+
+This is a historical snapshot dated 2026-11-04, not a report of the current test suite or current evaluation quality. Earlier copies recorded inconsistent test totals; those counts are intentionally omitted. Use the test-runner and CI summaries for the exact results of a given revision.
 
 ## Date & Execution Environment
 - **Date**: 2026-11-04
 - **Branch**: `unified-mizan`
 - **Python**: 3.12.13
-- **Test Framework**: `pytest-9.2.0`
-- **Initial Baseline Tests**: 143 passing tests across 13 test modules.
+- **Test-runner details**: Historical; current validation commands are maintained in `CONTRIBUTING.md` and CI.
 
 ## Architecture & Existing Capabilities
 Mizan is an evidence-linked security report triage workbench and assessment platform.
@@ -51,10 +52,8 @@ Mizan is an evidence-linked security report triage workbench and assessment plat
 - `tests/test_workbench_api.py`: Workbench role enforcement and error handling.
 
 ## Baseline Test Results
-- **Collected**: 143 items.
-- **Passed**: 143 items (100%).
-- **Failures**: 0.
-- **Errors**: 0.
+
+No current test count is asserted in this historical snapshot. The repository has changed since the baseline date; use the current `unittest`, `pytest`, and CI outputs for revision-specific results.
 
 ## Identified Weaknesses & Missing Evaluation Dimensions
 1. **Limited Evaluation Dataset**:
@@ -68,5 +67,6 @@ Mizan is an evidence-linked security report triage workbench and assessment plat
 5. **No Direct Model vs Pipeline Comparative Benchmark**:
    - Prior evaluations only evaluated whether the final output had valid fields, without comparing raw unverified model output vs the full Mizan guardrail pipeline on identical inputs.
 
-## Plan of Action
-Build a complete 100-case security benchmark suite, adversarial red-team runner, evidence verification evaluator, and empirical comparative analysis system.
+## Historical Plan of Action
+
+The original baseline proposed a 100-case suite, adversarial runner, evidence evaluator, and model comparison. The repository now contains synthetic regression artifacts, but their deterministic category-driven output is not an empirical model comparison. Live-provider evaluation and controlled human adjudication remain separate activities and are not evidenced by this baseline document.

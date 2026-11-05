@@ -1,4 +1,4 @@
-import json, os, sys, threading, unittest, urllib.request, urllib.error
+import json, os, sys, tempfile, threading, unittest, urllib.request, urllib.error
 from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -283,9 +283,11 @@ class HttpServer(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.auth_token = "mizan-test-judge-token-0123456789abcdef"
+        cls._data_dir = tempfile.TemporaryDirectory(prefix="mizan-http-test-")
         cls._auth_env = patch.dict(os.environ, {
             "MIZAN_JUDGE_TOKEN": cls.auth_token,
             "MODEL_API_KEY": "mizan-test-owner-key-never-real",
+            "MIZAN_DB_PATH": os.path.join(cls._data_dir.name, "mizan.sqlite3"),
         })
         cls._auth_env.start()
         cls.srv = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
@@ -294,7 +296,7 @@ class HttpServer(unittest.TestCase):
         cls._orig = meta_client.chat
     @classmethod
     def tearDownClass(cls):
-        cls.srv.shutdown(); cls.srv.server_close(); meta_client.chat = cls._orig; cls._auth_env.stop()
+        cls.srv.shutdown(); cls.srv.server_close(); meta_client.chat = cls._orig; cls._auth_env.stop(); cls._data_dir.cleanup()
 
     def call(self, path, body=None, method=None):
         req = urllib.request.Request(
