@@ -54,6 +54,21 @@ class ReviewStoreTests(unittest.TestCase):
         self.assertIsNone(case["review_decision"])
         self.assertEqual([e["event_type"] for e in review_store.report_history(case["id"])], ["report_received"])
 
+    def test_duplicate_contexts_are_workspace_scoped(self):
+        with review_store._connect() as conn:
+            conn.execute(
+                "INSERT INTO workspaces(id, name, created_at, created_by) VALUES (?, ?, ?, ?)",
+                ("other", "Other workspace", "2026-01-01T00:00:00Z", "test"),
+            )
+        default_case = self.create()
+        other_case = review_store.create_report(
+            "IDOR claim in another workspace.", "return Message.objects.get(id=message_id)", "en", workspace_id="other",
+        )
+        default_contexts = review_store.list_report_contexts(workspace_id="default")
+        other_contexts = review_store.list_report_contexts(workspace_id="other")
+        self.assertEqual({item["id"] for item in default_contexts}, {default_case["id"]})
+        self.assertEqual({item["id"] for item in other_contexts}, {other_case["id"]})
+
     def test_database_file_permissions_are_owner_only(self):
         self.create()
         self.assertEqual(review_store.database_path().stat().st_mode & 0o777, 0o600)

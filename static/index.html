@@ -470,7 +470,10 @@ function renderTriageIntelligence(parent, intelligence){
   const section=node("section","section");section.append(node("h3","","Phase 2B triage intelligence · review aid only"));
   const grid=node("div","result-grid"), classification=intelligence.classification||{}, priority=intelligence.prioritization||{};
   addField(grid,"Classification",`${classification.label||"unknown"} · not a final disposition`);
+  addField(grid,"Classification basis",(classification.basis||[]).join("\n")||"No basis reported.",true,true);
   addField(grid,"Review priority",`${priority.band||"unknown"} · score ${priority.score??"—"}/100`);
+  const factors=priority.factors||{};
+  addField(grid,"Priority factors",Object.entries(factors).map(([key,value])=>`${key}: ${value===null?"not applicable":value}`).join("\n")||"No factors reported.",true,true);
   addField(grid,"Human control",priority.human_review_required===false?"Not required":"Required for final decision");
   addField(grid,"Missing evidence",(intelligence.missing_evidence||[]).map(item=>item.request).join("\n")||"No deterministic gap identified; inspect semantic sufficiency manually.",true);
   addField(grid,"Contradictions",(intelligence.contradictions||[]).map(item=>`${item.type}: ${item.detail}`).join("\n")||"None detected by deterministic checks.",true);

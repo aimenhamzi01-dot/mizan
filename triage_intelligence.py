@@ -8,7 +8,6 @@ evidence requests, contradictions, and an explanation with limitations.
 from __future__ import annotations
 
 import re
-from collections import Counter
 from difflib import SequenceMatcher
 
 _WORD_RE = re.compile(r"[\w./:-]{2,}", re.UNICODE)
@@ -33,7 +32,7 @@ _TYPE_PATTERNS = {
 }
 
 _ROOT_CAUSE_PATTERNS = {
-    "missing-authorization": ("no ownership", "missing authorization", "access control", "authorization check", "صلاحيات", "ملكية"),
+    "missing-authorization": ("no ownership", "missing authorization", "access control", "authorization check", "authorization failure", "object authorization", "another user", "not owned", "مستخدم آخر", "ليست مملوكة", "صلاحيات", "ملكية"),
     "unsafe-query": ("string concatenation", "raw sql", "unsanitized", "parameterized", "استعلام"),
     "unsafe-path-normalization": ("path normalization", "url normalization", "canonicalization", "تطبيع المسار"),
     "unsafe-output-encoding": ("output encoding", "escape", "unescaped", "ترميز المخرجات"),
@@ -67,31 +66,57 @@ def extract_signals(report: str, code: str = "") -> dict:
     types = {name for name, patterns in _TYPE_PATTERNS.items() if _matches(text, patterns)}
     roots = {name for name, patterns in _ROOT_CAUSE_PATTERNS.items() if _matches(text, patterns)}
     assets = set(_URL_RE.findall(report or ""))
+    report_text = _text(report)
+    code_text = _text(code)
     return {
         "tokens": _tokens(text),
+        "report_tokens": _tokens(report_text),
+        "code_tokens": _tokens(code_text),
+        "report_normalized": " ".join(_tokens(report_text)),
+        "code_normalized": " ".join(_tokens(code_text)),
         "vulnerability_types": sorted(types),
         "root_causes": sorted(roots),
         "assets": sorted(assets)[:20],
     }
 
 
-def _similarity(current: dict, other: dict) -> tuple[float, list[str]]:
+def _similarity(current: dict, other: dict) -> tuple[float, list[str], dict]:
     reasons = []
-    token_score = _jaccard(current["tokens"], other["tokens"])
+    report_text_score = SequenceMatcher(None, current["report_normalized"], other["report_normalized"]).ratio()
+    vocabulary_score = _jaccard(current["report_tokens"], other["report_tokens"])
+    code_score = SequenceMatcher(None, current["code_normalized"], other["code_normalized"]).ratio() if current["code_normalized"] and other["code_normalized"] else 0.0
     type_overlap = set(current["vulnerability_types"]) & set(other["vulnerability_types"])
     root_overlap = set(current["root_causes"]) & set(other["root_causes"])
     asset_overlap = set(current["assets"]) & set(other["assets"])
+    signals = {
+        "report_text": round(report_text_score, 4),
+        "technical_vocabulary": round(vocabulary_score, 4),
+        "vulnerability_type": 1.0 if type_overlap else 0.0,
+        "affected_asset": 1.0 if asset_overlap else 0.0,
+        "root_cause": 1.0 if root_overlap else 0.0,
+        "relevant_code": round(code_score, 4),
+    }
+    if report_text_score >= 0.65:
+        reasons.append("report text similarity: %.2f" % report_text_score)
+    if vocabulary_score >= 0.35:
+        reasons.append("technical vocabulary similarity: %.2f" % vocabulary_score)
     if type_overlap:
         reasons.append("shared vulnerability type: " + ", ".join(sorted(type_overlap)))
     if root_overlap:
         reasons.append("shared root-cause signal: " + ", ".join(sorted(root_overlap)))
     if asset_overlap:
         reasons.append("shared affected asset: " + ", ".join(sorted(asset_overlap)[:3]))
-    score = 0.55 * token_score
-    score += 0.20 if type_overlap else 0
-    score += 0.15 if root_overlap else 0
-    score += 0.10 if asset_overlap else 0
-    return min(1.0, score), reasons
+    if code_score >= 0.60:
+        reasons.append("relevant code similarity: %.2f" % code_score)
+    score = (
+        0.25 * report_text_score + 0.20 * vocabulary_score +
+        0.20 * signals["vulnerability_type"] + 0.15 * signals["affected_asset"] +
+        0.10 * signals["root_cause"] + 0.10 * code_score
+    )
+    # A shared endpoint alone is not enough. Require a technical type/root/code
+    # match, or very strong text and vocabulary agreement.
+    eligible = bool(type_overlap or root_overlap or code_score >= 0.60 or (report_text_score >= 0.82 and vocabulary_score >= 0.55))
+    return min(1.0, score), reasons, {"signals": signals, "eligible": eligible}
 
 
 def duplicate_candidates(report: str, code: str, existing_reports: list[dict] | None = None, *, limit: int = 5) -> list[dict]:
@@ -103,31 +128,37 @@ def duplicate_candidates(report: str, code: str, existing_reports: list[dict] | 
             continue
         other_report = item.get("report", item.get("summary", ""))
         other_code = item.get("code", "")
-        if not isinstance(other_report, str):
+        if not isinstance(other_report, str) or len(other_report) > 20_000:
             continue
         other = extract_signals(other_report, other_code if isinstance(other_code, str) else "")
-        score, reasons = _similarity(current, other)
-        if score >= 0.52 and reasons:
+        score, reasons, details = _similarity(current, other)
+        if score >= 0.30 and reasons and details["eligible"]:
             candidates.append({
                 "report_id": str(item.get("id", ""))[:120],
                 "similarity": round(score, 4),
                 "reasons": reasons,
                 "confidence": "high" if score >= 0.78 else "medium",
+                "signals": details["signals"],
                 "human_confirmation_required": True,
             })
     candidates.sort(key=lambda item: (-item["similarity"], item["report_id"]))
     return candidates[:limit]
 
 
-def classify(analysis: dict) -> dict:
+def classify(analysis: dict, duplicate_candidates: list[dict] | None = None) -> dict:
     """Map advisory fields to a review label without changing the disposition."""
     verification = analysis.get("code_verification")
     citation = analysis.get("citation_integrity")
     decision = analysis.get("decision")
     severity = analysis.get("severity")
     noise = analysis.get("noise")
-    if verification == "contradicted" or decision == "reject":
-        label = "false-positive"
+    reasoning = _text(analysis.get("decision_reasoning"), analysis.get("claimed_impact"), *analysis.get("missing_context", []))
+    if verification == "contradicted":
+        label = "technically-contradicted"
+    elif decision == "duplicate" or duplicate_candidates:
+        label = "duplicate-candidate"
+    elif any(term in reasoning for term in ("out of scope", "out-of-scope", "not in scope", "خارج النطاق")):
+        label = "out-of-scope"
     elif noise == "scanner-dump":
         label = "informative"
     elif verification == "unverifiable" or citation != "verified" or decision == "need-info":
@@ -135,7 +166,7 @@ def classify(analysis: dict) -> dict:
     elif severity == "none":
         label = "informative"
     elif verification == "supported" and citation == "verified" and decision == "accept":
-        label = "valid-finding"
+        label = "supported-finding"
     else:
         label = "potential-finding"
     return {
@@ -144,6 +175,7 @@ def classify(analysis: dict) -> dict:
             "code_verification=" + str(verification),
             "citation_integrity=" + str(citation),
             "suggested_decision=" + str(decision),
+            "administrative_rejection_is_not_false_positive=true",
         ],
         "is_final_decision": False,
     }
@@ -202,6 +234,8 @@ def prioritize(analysis: dict, missing: list[dict], contradictions_found: list[d
         score = max(0, score - 12)
     if missing:
         score = max(0, score - min(12, len(missing) * 2))
+    if analysis.get("noise") == "scanner-dump":
+        score = min(score, 35)
     band = "critical" if score >= 80 else "high" if score >= 60 else "normal" if score >= 35 else "low"
     return {
         "score": round(score, 2),
@@ -214,6 +248,7 @@ def prioritize(analysis: dict, missing: list[dict], contradictions_found: list[d
             "exploitability": exploitability,
             "missing_evidence_penalty": min(12, len(missing) * 2),
             "contradiction_penalty": 12 if contradictions_found else 0,
+            "scanner_cap": 35 if analysis.get("noise") == "scanner-dump" else None,
         },
         "human_review_required": True,
     }
@@ -224,10 +259,11 @@ def enrich(analysis: dict, report: str, code: str = "", existing_reports: list[d
     result = dict(analysis)
     missing = missing_evidence(result, report, code)
     contradictions_found = contradictions(result, report, code)
+    candidates = duplicate_candidates(report, code, existing_reports)
     result["triage_intelligence"] = {
-        "schema_version": "phase-2b-v1",
-        "classification": classify(result),
-        "duplicate_candidates": duplicate_candidates(report, code, existing_reports),
+        "schema_version": "phase-2b.1-v1",
+        "classification": classify(result, candidates),
+        "duplicate_candidates": candidates,
         "prioritization": prioritize(result, missing, contradictions_found),
         "missing_evidence": missing,
         "contradictions": contradictions_found,

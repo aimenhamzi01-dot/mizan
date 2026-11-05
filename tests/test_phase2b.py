@@ -56,7 +56,7 @@ class Phase2B(unittest.TestCase):
         data.update({"code_verification": "contradicted", "decision": "reject"})
         result = self.enrich(data)
         intelligence = result["triage_intelligence"]
-        self.assertEqual(intelligence["classification"]["label"], "false-positive")
+        self.assertEqual(intelligence["classification"]["label"], "technically-contradicted")
         self.assertTrue(any(item["type"] == "code-vs-claim" for item in intelligence["contradictions"]))
         self.assertTrue(intelligence["explainability"]["limitations"])
 
@@ -78,6 +78,33 @@ class Phase2B(unittest.TestCase):
         self.assertEqual(intelligence["classification"]["label"], "informative")
         self.assertTrue(intelligence["prioritization"]["human_review_required"])
         self.assertEqual(result["decision"], "need-info")
+        self.assertLessEqual(intelligence["prioritization"]["score"], 35)
+
+    def test_administrative_rejection_is_not_false_positive(self):
+        data = copy.deepcopy(BASE)
+        data.update({"decision": "reject", "decision_reasoning": "Rejected because the asset is out of scope."})
+        result = self.enrich(data)
+        self.assertEqual(result["triage_intelligence"]["classification"]["label"], "out-of-scope")
+
+    def test_duplicate_signals_are_separate_and_shared_endpoint_is_not_enough(self):
+        existing = [
+            {"id": "same-endpoint-different-root", "report": "Reflected XSS on /api/invoices/1057", "code": "return mark_safe(q)"},
+            {"id": "same-type-different-wording", "report": "Object authorization failure lets another account view invoice records", "code": CODE},
+        ]
+        candidates = self.enrich(existing=existing)["triage_intelligence"]["duplicate_candidates"]
+        ids = {item["report_id"] for item in candidates}
+        self.assertNotIn("same-endpoint-different-root", ids)
+        self.assertIn("same-type-different-wording", ids)
+        signals = next(item["signals"] for item in candidates if item["report_id"] == "same-type-different-wording")
+        self.assertEqual(set(signals), {"report_text", "technical_vocabulary", "vulnerability_type", "affected_asset", "root_cause", "relevant_code"})
+
+    def test_malformed_and_oversized_duplicate_contexts_are_ignored(self):
+        existing = [
+            None,
+            {"id": "bad", "report": 123},
+            {"id": "huge", "report": "IDOR " + ("x" * 20001)},
+        ]
+        self.assertEqual(self.enrich(existing=existing)["triage_intelligence"]["duplicate_candidates"], [])
 
     def test_incorrect_severity_and_contradictory_accept_are_visible(self):
         data = copy.deepcopy(BASE)
